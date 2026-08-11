@@ -50,8 +50,11 @@ jobs:
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
           
-          # Fix for popup warnings
+          # Optimizations for maximum performance on 2 CPU cores
           echo "hw.cpu.ncore=2" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.ramSize=3072" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "vm.heapSize=512" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
           avdmanager list avd
@@ -108,7 +111,8 @@ jobs:
 
       - name: Start virtual display + emulator + VNC
         run: |
-          Xvfb :0 -screen 0 1080x1920x24 &
+          # Use 720p resolution for massive performance boost in software rendering
+          Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           
           # Force emulator window to be fullscreen and borderless
@@ -126,7 +130,7 @@ jobs:
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
-            -skin 1080x1920 &
+            -skin 720x1280 &
 
           # Wait for boot
           $ANDROID_HOME/platform-tools/adb wait-for-device
@@ -137,8 +141,8 @@ jobs:
             sleep 5
           done
 
-          # x11vnc on virtual display
-          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet
+          # x11vnc with performance tuning
+          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared
 
           # noVNC websockify on port 8000
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
