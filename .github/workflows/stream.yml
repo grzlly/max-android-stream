@@ -42,6 +42,8 @@ jobs:
 
       - name: Create AVD
         run: |
+          # setup-android exports $ANDROID_HOME but let's make sure tools are found
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
           avdmanager list avd
@@ -102,17 +104,17 @@ jobs:
           export DISPLAY=:0
           
           # Start emulator
-          emulator @max_device \
+          $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
             -skin 1080x1920 &
 
           # Wait for boot
-          adb wait-for-device
+          $ANDROID_HOME/platform-tools/adb wait-for-device
           echo "Waiting for full boot..."
           for i in $(seq 1 90); do
-            boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            boot=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$boot" = "1" ] && echo "Booted!" && break
             sleep 5
           done
@@ -127,9 +129,9 @@ jobs:
       - name: Install and launch Max
         run: |
           echo "Installing Max APK..."
-          adb install -r max.apk || true
+          $ANDROID_HOME/platform-tools/adb install -r max.apk || true
           echo "Launching Max..."
-          adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1 || true
+          $ANDROID_HOME/platform-tools/adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1 || true
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
