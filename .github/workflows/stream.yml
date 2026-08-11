@@ -115,7 +115,7 @@ jobs:
                           if (d.ready) {
                               document.getElementById('loading').style.display = 'none';
                               const f = document.getElementById('vnc-frame');
-                              f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true&path=websockify';
+                              f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true&reconnect=true&reconnect_delay=1000&path=websockify';
                               f.style.display = 'block';
                               iframeLoaded = true;
                               updateScale();
@@ -182,7 +182,7 @@ jobs:
                       execSync(`${ADB} -s emulator-5554 shell pm clear ${PACKAGE_NAME}`);
                       console.log("Relaunching app...");
                       execSync(`${ADB} -s emulator-5554 shell monkey -p ${PACKAGE_NAME} -c android.intent.category.LAUNCHER 1`);
-                      setTimeout(() => { session.isReady = true; }, 2000);
+                      setTimeout(() => { session.isReady = true; }, 3000);
                   } catch(e) {
                       console.error("Reset error:", e);
                       session.isReady = true;
@@ -191,7 +191,7 @@ jobs:
           }
 
           function getIp(req) {
-              return req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+              return req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress;
           }
 
           app.get('/', (req, res) => {
