@@ -60,24 +60,20 @@ jobs:
 
       - name: Setup Web UI
         run: |
+          # Write the main loading page (restored original design)
           cat << 'EOF' | sudo tee /usr/share/novnc/index.html
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-              <title>Max</title>
+              <title>Max Emulator</title>
               <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { background: #000; overflow: hidden; }
+                  body { margin: 0; padding: 0; background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
                   iframe { width: 100vw; height: 100vh; border: none; display: none; }
-                  #loading { position: fixed; inset: 0; display: flex; flex-direction: column;
-                             align-items: center; justify-content: center;
-                             background: #111; color: #fff; font-family: sans-serif; }
-                  .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc;
-                             border-radius: 50%; width: 48px; height: 48px;
-                             animation: spin 1s linear infinite; margin-bottom: 20px; }
-                  @keyframes spin { to { transform: rotate(360deg); } }
+                  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+                  .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+                  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
               </style>
               <script>
                   setTimeout(function() {
@@ -91,19 +87,24 @@ jobs:
           <body>
               <div id="loading">
                   <div class="spinner"></div>
-                  <p>Запуск...</p>
+                  <h2>Установка и запуск эмулятора...</h2>
+                  <p>Пожалуйста, подождите (до 60-90 секунд).</p>
               </div>
               <iframe id="vnc-frame" allowfullscreen></iframe>
           </body>
           </html>
           EOF
 
+          # Hide the noVNC left control bar (the panel with icons that appears on the left in the browser)
+          sudo sed -i 's|</head>|<style>#noVNC_control_bar_anchor,#noVNC_control_bar_hint{display:none!important;width:0!important;}</style></head>|' /usr/share/novnc/vnc.html
+
       - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # 1. Start Xvfb and wait until ready
-          Xvfb :0 -screen 0 720x1280x24 &
+          # 1. Start Xvfb larger than Android screen to accommodate emulator's own Qt toolbar
+          # We will crop to 720x1280 via x11vnc later
+          Xvfb :0 -screen 0 900x1400x24 &
           export DISPLAY=:0
           for i in $(seq 1 30); do
             xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
@@ -117,7 +118,7 @@ jobs:
           fluxbox -display :0 2>/dev/null &
           sleep 2
 
-          # 3. CRITICAL: Start ADB BEFORE the emulator so it is ready when emulator boots
+          # 3. Start ADB BEFORE the emulator
           $ADB start-server
           echo "ADB daemon started"
 
@@ -129,27 +130,25 @@ jobs:
           EMU_PID=$!
           echo "Emulator started (PID: $EMU_PID)"
 
-          # 5. Run popup-dismisser in BACKGROUND (parallel, not sequential!)
+          # 5. Popup dismisser runs in BACKGROUND - targets active window every second
+          # Handles: "4 CPU cores" warning, "Nested Virtualization" warning, and any other dialogs
           export DISPLAY=:0
           (
-            sleep 5
-            echo "[dismiss] Starting popup dismissal loop in background..."
-            for i in $(seq 1 200); do
+            sleep 8
+            echo "[dismiss] Popup dismissal started"
+            for i in $(seq 1 120); do
               ACTIVE=$(xdotool getactivewindow 2>/dev/null || echo "")
               if [ -n "$ACTIVE" ]; then
                 xdotool key --window "$ACTIVE" --clearmodifiers Return 2>/dev/null || true
               fi
-              for WID in $(xdotool search --class "qemu" 2>/dev/null || true); do
-                xdotool key --window "$WID" --clearmodifiers Return 2>/dev/null || true
-              done
               sleep 1
             done
-            echo "[dismiss] Done."
+            echo "[dismiss] Done"
           ) &
           DISMISS_PID=$!
 
-          # 6. Wait for ADB device to be online (up to 3 min)
-          echo "Waiting for ADB device..."
+          # 6. Wait for ADB online (up to 3 min)
+          echo "Waiting for ADB..."
           for i in $(seq 1 36); do
             STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
             if [ "$STATE" = "device" ]; then
@@ -157,40 +156,55 @@ jobs:
               break
             fi
             if [ "$STATE" = "offline" ]; then
-              echo "ADB offline - running reconnect..."
               $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
             fi
-            echo "ADB state: $STATE ($i/36)"
+            echo "ADB: $STATE ($i/36)"
             sleep 5
           done
 
-          # 7. Wait for Android to finish booting
-          echo "Waiting for Android boot..."
+          # 7. Wait for Android boot
+          echo "Waiting for boot..."
           for i in $(seq 1 60); do
             BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
             echo "Boot: '$BOOT' ($i/60)"
             sleep 5
           done
-
-          # Let Google Play services settle
           sleep 5
 
-          # 8. Stop the popup dismisser
+          # 8. Kill dismisser
           kill $DISMISS_PID 2>/dev/null || true
 
-          # 9. Resize the emulator window to fill the screen (no black borders)
+          # 9. Auto-detect emulator window geometry and position the Android screen at (0,0)
           WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
           if [ -n "$WID" ]; then
-            xdotool windowsize "$WID" 720 1280 2>/dev/null || true
-            xdotool windowmove "$WID" 0 0 2>/dev/null || true
-            echo "Window resized to 720x1280"
+            # Get the full emulator window size (includes Qt sidebar + title bar)
+            GEOM_LINE=$(xdotool getwindowgeometry "$WID" 2>/dev/null | grep "Geometry:" || echo "Geometry: 772x1310")
+            WIN_W=$(echo "$GEOM_LINE" | grep -oP '\d+(?=x)' | head -1 || echo "772")
+            WIN_H=$(echo "$GEOM_LINE" | grep -oP '(?<=x)\d+' | head -1 || echo "1310")
+            echo "Emulator window: ${WIN_W}x${WIN_H}"
+
+            # Sidebar = total_width - android_screen_width (720)
+            SIDEBAR=$(( WIN_W - 720 ))
+            [ "$SIDEBAR" -lt "0" ] && SIDEBAR=0
+            [ "$SIDEBAR" -gt "150" ] && SIDEBAR=52
+
+            # Title bar height = total_height - android_screen_height (1280)
+            TITLEBAR=$(( WIN_H - 1280 ))
+            [ "$TITLEBAR" -lt "0" ] && TITLEBAR=0
+            [ "$TITLEBAR" -gt "100" ] && TITLEBAR=30
+
+            echo "Sidebar: ${SIDEBAR}px, Titlebar: ${TITLEBAR}px"
+
+            # Move the window so the Android display starts exactly at (0,0)
+            xdotool windowmove "$WID" -$SIDEBAR -$TITLEBAR 2>/dev/null || true
+            echo "Android screen now at (0,0)"
           else
             echo "WARNING: emulator window not found"
           fi
 
-          # 10. Start VNC + noVNC
-          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
+          # 10. Start VNC: capture only 720x1280 starting from (0,0) - exactly the Android screen
+          x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
           echo "noVNC running on :8000"
 
@@ -198,7 +212,6 @@ jobs:
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # Fresh ADB for this step
           $ADB kill-server 2>/dev/null || true
           sleep 2
           $ADB start-server
@@ -227,7 +240,6 @@ jobs:
           $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
           $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
 
-          # FIX: head -1 and strip whitespace to get only the package name, no extra lines
           PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+" | head -1 | tr -d '[:space:]')
           echo "Package: $PACKAGE_NAME"
 
