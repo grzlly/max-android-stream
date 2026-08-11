@@ -110,7 +110,6 @@ jobs:
           done
 
           # 2. Fluxbox: borderless windows, no toolbar
-          # Using printf to avoid heredoc-inside-heredoc YAML issues
           mkdir -p ~/.fluxbox
           printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
@@ -118,14 +117,14 @@ jobs:
           sleep 2
 
           # 3. Start emulator
+          # NOTE: Do NOT use -display flag - emulator uses DISPLAY env var automatically
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio \
             -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
             -no-skin \
-            -no-metrics \
-            -display :0 &
+            -no-metrics &
 
           echo "Emulator started, waiting for Qt window..."
 
