@@ -38,7 +38,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt scrcpy
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -56,6 +56,11 @@ jobs:
           echo "vm.heapSize=512" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          
+          # Explicitly set resolution of Android device internally
+          echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
           avdmanager list avd
 
@@ -107,14 +112,19 @@ jobs:
             [Maximized] {yes}
           [end]
           EOF
+          cat << 'EOF' > ~/.fluxbox/init
+          session.screen0.toolbar.visible: false
+          EOF
           fluxbox -display :0 &
           
+          # Native Emulator Window (No scrcpy, No xdotool)
+          # -no-skin prevents hardware buttons
+          # fluxbox [Maximized] {yes} forces the emulator window to fill 720x1280
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
-            -no-window \
-            -skin 720x1280 &
+            -no-skin &
 
           $ANDROID_HOME/platform-tools/adb wait-for-device
           echo "Waiting for full boot..."
@@ -123,9 +133,6 @@ jobs:
             [ "$boot" = "1" ] && echo "Booted!" && break
             sleep 5
           done
-
-          # Capture and mirror the display
-          LIBGL_ALWAYS_SOFTWARE=1 scrcpy &
 
           # Run x11vnc targeting the Xvfb screen
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared
