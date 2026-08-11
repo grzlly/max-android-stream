@@ -158,6 +158,13 @@ jobs:
           echo "Installing Max APK..."
           $ANDROID_HOME/platform-tools/adb install -r max.apk || true
           
+          # --- KIOSK MODE SETUP ---
+          # 1. Disable the lock screen (no swipe to unlock needed)
+          $ANDROID_HOME/platform-tools/adb shell settings put secure lockscreen.disabled 1
+          
+          # 2. Hide status bar (top) and navigation bar (bottom) completely
+          $ANDROID_HOME/platform-tools/adb shell settings put global policy_control immersive.full=*
+          
           # Dynamically detect exact package name from APK
           PACKAGE_NAME=$(aapt dump badging max.apk | grep package | grep -oP "name='\K[^']+")
           echo "Detected package name: $PACKAGE_NAME"
