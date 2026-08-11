@@ -105,71 +105,60 @@ jobs:
           # 1. Start Xvfb and wait until ready
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
-          echo "Waiting for Xvfb..."
           for i in $(seq 1 30); do
             xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
             sleep 1
           done
 
-          # 2. Fluxbox: borderless windows, no toolbar
+          # 2. Fluxbox: borderless, no toolbar
           mkdir -p ~/.fluxbox
           printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
           fluxbox -display :0 2>/dev/null &
           sleep 2
 
-          # CRITICAL: Start ADB daemon BEFORE the emulator so it can connect on boot
-          echo "Starting ADB daemon before emulator..."
+          # 3. CRITICAL: Start ADB BEFORE the emulator so it is ready when emulator boots
           $ADB start-server
-          echo "ADB daemon started."
+          echo "ADB daemon started"
 
-          # 3. Start emulator
+          # 4. Start emulator
           $ANDROID_HOME/emulator/emulator @max_device \
-            -no-audio \
-            -no-boot-anim \
+            -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-snapshot \
-            -no-skin \
-            -no-metrics &
+            -no-snapshot -no-skin -no-metrics &
+          EMU_PID=$!
+          echo "Emulator started (PID: $EMU_PID)"
 
-          echo "Emulator process started."
+          # 5. Run popup-dismisser in BACKGROUND (parallel, not sequential!)
+          # Targets the actively focused window, works regardless of popup timing.
+          export DISPLAY=:0
+          (
+            sleep 5
+            echo "[dismiss] Starting popup dismissal loop in background..."
+            for i in $(seq 1 200); do
+              ACTIVE=$(xdotool getactivewindow 2>/dev/null || echo "")
+              if [ -n "$ACTIVE" ]; then
+                xdotool key --window "$ACTIVE" --clearmodifiers Return 2>/dev/null || true
+              fi
+              for WID in $(xdotool search --class "qemu" 2>/dev/null || true); do
+                xdotool key --window "$WID" --clearmodifiers Return 2>/dev/null || true
+              done
+              sleep 1
+            done
+            echo "[dismiss] Done."
+          ) &
+          DISMISS_PID=$!
 
-          # 4. Dismiss Qt popup dialogs every second for the first 60 seconds.
-          # We press Return on the active window (no window ID needed - targets whatever has focus).
-          # This reliably dismisses the "4 CPU cores" and any other blocking dialogs.
-          echo "Dismissing any Qt popup dialogs for 60 seconds..."
-          for i in $(seq 1 60); do
-            xdotool key --clearmodifiers Return 2>/dev/null || true
-            sleep 1
-          done
-          echo "Popup dismissal loop done."
-
-          # 5. Resize the emulator window to fill the screen exactly
-          WID=""
-          for i in $(seq 1 30); do
-            WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
-            [ -n "$WID" ] && echo "Found emulator window: $WID" && break
-            sleep 1
-          done
-          if [ -n "$WID" ]; then
-            xdotool windowsize "$WID" 720 1280 2>/dev/null || true
-            xdotool windowmove "$WID" 0 0 2>/dev/null || true
-            echo "Window resized to 720x1280"
-          else
-            echo "WARNING: emulator window not found via xdotool"
-          fi
-
-          # 6. Wait for ADB device to be online
-          # Use emulator-5554 serial explicitly since we know the emulator uses that port
-          echo "Waiting for ADB device to come online..."
+          # 6. Wait for ADB device to be online (up to 3 min)
+          echo "Waiting for ADB device..."
           for i in $(seq 1 36); do
             STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
             if [ "$STATE" = "device" ]; then
-              echo "ADB online! (state=device)"
+              echo "ADB online!"
               break
             fi
             if [ "$STATE" = "offline" ]; then
-              echo "Device offline, running reconnect..."
+              echo "ADB offline - running reconnect..."
               $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
             fi
             echo "ADB state: $STATE ($i/36)"
@@ -180,15 +169,28 @@ jobs:
           echo "Waiting for Android boot..."
           for i in $(seq 1 60); do
             BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            [ "$BOOT" = "1" ] && echo "Android fully booted!" && break
+            [ "$BOOT" = "1" ] && echo "Android booted!" && break
             echo "Boot: '$BOOT' ($i/60)"
             sleep 5
           done
 
-          # Let Google Play Services settle
+          # Let Google Play services settle
           sleep 5
 
-          # 8. Start VNC + noVNC
+          # 8. Stop the popup dismisser
+          kill $DISMISS_PID 2>/dev/null || true
+
+          # 9. Resize the emulator window to fill the screen (no black borders)
+          WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
+          if [ -n "$WID" ]; then
+            xdotool windowsize "$WID" 720 1280 2>/dev/null || true
+            xdotool windowmove "$WID" 0 0 2>/dev/null || true
+            echo "Window resized to 720x1280"
+          else
+            echo "WARNING: emulator window not found"
+          fi
+
+          # 10. Start VNC + noVNC
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
           echo "noVNC running on :8000"
@@ -197,7 +199,7 @@ jobs:
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # Reconnect ADB cleanly for this step
+          # Fresh ADB for this step
           $ADB kill-server 2>/dev/null || true
           sleep 2
           $ADB start-server
@@ -206,11 +208,9 @@ jobs:
           STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
           echo "ADB state: $STATE"
           if [ "$STATE" != "device" ]; then
-            # One more attempt to recover
             $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
             sleep 5
             STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
-            echo "ADB state after recovery: $STATE"
             if [ "$STATE" != "device" ]; then
               echo "ERROR: Device not ready! State=$STATE"
               $ADB devices -l
