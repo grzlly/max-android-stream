@@ -68,15 +68,26 @@ jobs:
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
               <title>Max Emulator</title>
               <style>
-                  body { margin: 0; padding: 0; background: #000; color: white; font-family: sans-serif; overflow-x: hidden; }
-                  iframe { width: 720px; height: 1280px; border: none; display: none; transform-origin: top left; }
+                  body { margin: 0; padding: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; }
+                  iframe { width: 720px; height: 1280px; border: none; display: none; transform-origin: top center; }
                   #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
                   .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
                   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
               </style>
               <script>
                   function updateScale() {
-                      var scale = window.innerWidth / 720;
+                      var phoneRatio = 720 / 1280;
+                      var windowRatio = window.innerWidth / window.innerHeight;
+                      var scale;
+                      
+                      if (windowRatio < phoneRatio) {
+                          // Mobile: Window is narrower than the phone. Fit by width.
+                          scale = window.innerWidth / 720;
+                      } else {
+                          // PC: Window is wider than the phone. Fit by height.
+                          scale = window.innerHeight / 1280;
+                      }
+                      
                       var f = document.getElementById('vnc-frame');
                       if(f) {
                           f.style.transform = 'scale(' + scale + ')';
@@ -201,7 +212,8 @@ jobs:
 
           echo "Applying Kiosk Mode..."
           $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
-          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.systemui
+          # Keep System UI enabled so user has back/home buttons if they get stuck in browser
+          # $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.systemui
           $ADB -s emulator-5554 shell settings put global window_animation_scale 0
           $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
           $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
