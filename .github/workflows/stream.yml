@@ -7,6 +7,9 @@ jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    env:
+      ANDROID_AVD_HOME: /home/runner/.android/avd
+      ANDROID_USER_HOME: /home/runner/.android
 
     steps:
       - uses: actions/checkout@v4
@@ -42,8 +45,8 @@ jobs:
 
       - name: Create AVD
         run: |
-          # setup-android exports $ANDROID_HOME but let's make sure tools are found
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          mkdir -p $ANDROID_AVD_HOME
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
           avdmanager list avd
