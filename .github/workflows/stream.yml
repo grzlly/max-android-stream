@@ -78,7 +78,8 @@ jobs:
                   setTimeout(function() {
                       document.getElementById('loading').style.display = 'none';
                       var f = document.getElementById('vnc-frame');
-                      f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
+                      // resize=scale allows noVNC to dynamically fit the emulator into the browser window
+                      f.src = 'vnc.html?autoconnect=true&resize=scale&show_dot=true';
                       f.style.display = 'block';
                       f.onload = function() {
                           try {
@@ -159,21 +160,17 @@ jobs:
           done
           sleep 5
 
-          # 7. Launch scrcpy to render the Android screen directly to the Xvfb.
-          #    --max-size 720 ensures the display is exactly 720px wide (1280 tall)
-          #    --window-borderless removes any window frame
-          #    Position at (0,0) fills the exact 720x1280 Xvfb
+          # 7. Launch scrcpy in fullscreen mode
+          #    Using --fullscreen perfectly maps the device to the 720x1280 Xvfb screen
+          #    Without it, scrcpy restricts resolution by default
           DISPLAY=:0 scrcpy \
             -s emulator-5554 \
-            --max-size 720 \
-            --window-x 0 \
-            --window-y 0 \
-            --window-borderless \
+            --fullscreen \
             2>/dev/null &
           sleep 4
-          echo "scrcpy rendering Android screen at 720x1280"
+          echo "scrcpy rendering Android screen in fullscreen"
 
-          # 8. Start VNC capturing the full Xvfb (= exact Android screen from scrcpy)
+          # 8. Start VNC capturing the full Xvfb
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
           echo "noVNC running on :8000"
