@@ -38,159 +38,211 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create AVD (Top Tier Performance)
+      - name: Create AVD
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p $ANDROID_AVD_HOME
-          # Using google_apis because WhiteMAX requires it
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
-          
-          # Exact 720p Resolution Setup
-          echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+
+          # 720p screen, GPU on, physical keyboard enabled
+          echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          
+          echo "hw.keyboard=yes"    >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+
           avdmanager list avd
 
-      - name: Setup Web UI (Scale OFF by default)
+      - name: Setup Web UI
         run: |
-          cat << 'EOF' | sudo tee /usr/share/novnc/index.html
+          cat << 'HTMLEOF' | sudo tee /usr/share/novnc/index.html
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-              <title>Max Emulator</title>
+              <title>Max</title>
               <style>
-                  body { margin: 0; padding: 0; background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { background: #000; overflow: hidden; }
                   iframe { width: 100vw; height: 100vh; border: none; display: none; }
-                  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-                  .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-                  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                  #loading { position: fixed; inset: 0; display: flex; flex-direction: column;
+                             align-items: center; justify-content: center;
+                             background: #111; color: #fff; font-family: sans-serif; }
+                  .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc;
+                             border-radius: 50%; width: 48px; height: 48px;
+                             animation: spin 1s linear infinite; margin-bottom: 20px; }
+                  @keyframes spin { to { transform: rotate(360deg); } }
               </style>
               <script>
-                  setTimeout(() => {
+                  setTimeout(function() {
                       document.getElementById('loading').style.display = 'none';
-                      const f = document.getElementById('vnc-frame');
-                      // resize=off fixes the tiny vertical line issue on desktop!
+                      var f = document.getElementById('vnc-frame');
                       f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
                       f.style.display = 'block';
-                  }, 5000);
+                  }, 7000);
               </script>
           </head>
           <body>
               <div id="loading">
                   <div class="spinner"></div>
-                  <h2>Установка и запуск эмулятора...</h2>
-                  <p>Пожалуйста, подождите (до 60-90 секунд).</p>
+                  <p>Запуск...</p>
               </div>
               <iframe id="vnc-frame" allowfullscreen></iframe>
           </body>
           </html>
-          EOF
+          HTMLEOF
 
-      - name: Start virtual display + headless emulator + VNC
+      - name: Start display, window manager, emulator and VNC
         run: |
+          # --- 1. Start Xvfb and WAIT until it is ready ---
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
-          
-          # Pure borderless setup via fluxbox
+          echo "Waiting for Xvfb..."
+          for i in $(seq 1 30); do
+            xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
+            sleep 1
+          done
+
+          # --- 2. Start fluxbox (borderless, no toolbar) ---
           mkdir -p ~/.fluxbox
-          cat << 'EOF' > ~/.fluxbox/apps
-          [app] (.*)
-            [Deco] {NONE}
-            [Position] (UPPERLEFT) {0 0}
-          [end]
-          EOF
-          cat << 'EOF' > ~/.fluxbox/init
-          session.screen0.toolbar.visible: false
-          EOF
-          fluxbox -display :0 &
-          
-          # Native Emulator Window WITHOUT hardware buttons (-no-skin)
+          cat > ~/.fluxbox/apps << 'FBEOF'
+[app] (.*)
+  [Deco] {NONE}
+  [Position] (UPPERLEFT) {0 0}
+[end]
+FBEOF
+          cat > ~/.fluxbox/init << 'FBEOF'
+session.screen0.toolbar.visible: false
+FBEOF
+          fluxbox -display :0 2>/dev/null &
+          sleep 2
+
+          # --- 3. Start emulator (no-skin, no-metrics to suppress Qt popups) ---
           $ANDROID_HOME/emulator/emulator @max_device \
-            -no-audio -no-boot-anim \
+            -no-audio \
+            -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
-            -no-skin &
+            -no-skin \
+            -no-metrics \
+            -display :0 &
 
-          echo "Waiting for emulator window to appear..."
-          sleep 10
-          
-          # Force the window to exactly fill the 720x1280 screen, removing ALL black borders
-          WID=$(xdotool search --sync --onlyvisible --class "qemu" | head -1 || echo "")
-          if [ ! -z "$WID" ]; then
-            echo "Resizing emulator window $WID to 720x1280"
-            xdotool windowactivate $WID
-            # Send Enter key to dismiss any Qt warning dialogs!
-            xdotool key Return
-            xdotool windowsize $WID 720 1280
-            xdotool windowmove $WID 0 0
-          else
-            echo "Failed to find emulator window with xdotool"
-          fi
+          echo "Emulator launched, waiting for its window and dismissing any popups..."
 
-          $ANDROID_HOME/platform-tools/adb wait-for-device || true
-          echo "Waiting for full boot..."
+          # --- 4. Wait for the emulator Qt window, then dismiss popups & resize ---
+          # Loop up to 90 seconds waiting for the qemu window to appear
+          WID=""
           for i in $(seq 1 90); do
-            boot=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            if [ "$boot" = "1" ]; then
-              echo "Booted!"
+            WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
+            if [ -n "$WID" ]; then
+              echo "Found emulator window: $WID"
               break
             fi
-            
-            # Auto-fix ADB if the device goes offline during a heavy boot
-            state=$($ANDROID_HOME/platform-tools/adb get-state 2>/dev/null || echo "offline")
-            if [ "$state" = "offline" ]; then
-              echo "Device offline, restarting adb daemon..."
-              $ANDROID_HOME/platform-tools/adb kill-server
-              $ANDROID_HOME/platform-tools/adb start-server
-              $ANDROID_HOME/platform-tools/adb reconnect offline || true
+            sleep 1
+          done
+
+          if [ -n "$WID" ]; then
+            xdotool windowactivate "$WID" 2>/dev/null || true
+            # Press Enter/Return several times with pauses to dismiss any warning dialogs
+            for j in 1 2 3; do
+              xdotool key --window "$WID" Return 2>/dev/null || true
+              sleep 1
+            done
+            xdotool windowsize "$WID" 720 1280 2>/dev/null || true
+            xdotool windowmove "$WID" 0 0 2>/dev/null || true
+            echo "Window resized and positioned."
+          else
+            echo "WARNING: Could not find emulator window via xdotool."
+          fi
+
+          # --- 5. Wait for ADB device to be fully online (not just boot_completed) ---
+          echo "Waiting for ADB device to come online..."
+          ADB="$ANDROID_HOME/platform-tools/adb"
+
+          # Give emulator up to 3 minutes to have a stable online ADB connection
+          for i in $(seq 1 36); do
+            STATE=$($ADB get-state 2>/dev/null || echo "unknown")
+            if [ "$STATE" = "device" ]; then
+              echo "ADB is online (state=device)"
+              break
             fi
-            
+            if [ "$STATE" = "offline" ]; then
+              echo "ADB offline, reconnecting..."
+              $ADB kill-server 2>/dev/null || true
+              sleep 2
+              $ADB start-server 2>/dev/null || true
+              $ADB reconnect 2>/dev/null || true
+            fi
+            echo "ADB state: $STATE, waiting... ($i/36)"
             sleep 5
           done
 
-          # Run x11vnc with performance tuning (60fps feel)
-          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
-          
-          # noVNC websockify on port 8000
-          websockify --web=/usr/share/novnc 8000 localhost:5900 &
-          echo "noVNC running on :8000"
+          # Wait for Android to fully boot
+          echo "Waiting for Android boot_completed..."
+          for i in $(seq 1 60); do
+            BOOT=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            [ "$BOOT" = "1" ] && echo "Android booted!" && break
+            echo "Boot status: $BOOT ($i/60)"
+            sleep 5
+          done
 
-      - name: Install and launch Max
+          # Small extra wait to let Google Play services settle
+          sleep 5
+
+          # --- 6. Start VNC ---
+          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
+          websockify --web=/usr/share/novnc 8000 localhost:5900 &
+          echo "noVNC is running on :8000"
+
+      - name: Install Max and apply Kiosk Mode
         run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+
+          # Fresh ADB connection for this step
+          $ADB kill-server 2>/dev/null || true
+          sleep 2
+          $ADB start-server
+
+          # Confirm device is still online
+          STATE=$($ADB get-state 2>/dev/null || echo "unknown")
+          echo "ADB state before install: $STATE"
+          if [ "$STATE" != "device" ]; then
+            echo "ERROR: Device not ready for install! State=$STATE"
+            $ADB devices -l
+            exit 1
+          fi
+
+          # Install APK
           echo "Installing Max APK..."
-          # Restart adb just in case before installation
-          $ANDROID_HOME/platform-tools/adb kill-server
-          $ANDROID_HOME/platform-tools/adb start-server
-          
-          $ANDROID_HOME/platform-tools/adb install -r max.apk || true
-          
-          # --- TRUE KIOSK MODE & PERFORMANCE ---
-          $ANDROID_HOME/platform-tools/adb shell settings put secure lockscreen.disabled 1
-          
-          echo "Killing System UI for True Kiosk Mode..."
-          $ANDROID_HOME/platform-tools/adb shell pm disable-user --user 0 com.android.systemui || true
-          
-          echo "Disabling animations for maximum speed..."
-          $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0 || true
-          $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0 || true
-          $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0 || true
-          
-          PACKAGE_NAME=$(aapt dump badging max.apk | grep package | grep -oP "name='\K[^']+")
-          echo "Detected package name: $PACKAGE_NAME"
-          
+          $ADB install -r max.apk
+
+          # --- Kiosk Mode ---
+          echo "Applying Kiosk Mode..."
+
+          # Disable lock screen
+          $ADB shell settings put secure lockscreen.disabled 1
+
+          # Kill SystemUI completely (removes status bar, nav bar, notification shade)
+          $ADB shell pm disable-user --user 0 com.android.systemui
+
+          # Kill all animations (instant app response)
+          $ADB shell settings put global window_animation_scale 0
+          $ADB shell settings put global transition_animation_scale 0
+          $ADB shell settings put global animator_duration_scale 0
+
+          # Detect package and launch
+          PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+'" | tr -d "'")
+          echo "Package: $PACKAGE_NAME"
+
           echo "Launching Max..."
-          $ANDROID_HOME/platform-tools/adb shell monkey -p $PACKAGE_NAME -c android.intent.category.LAUNCHER 1 || true
+          $ADB shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
