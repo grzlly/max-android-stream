@@ -47,22 +47,16 @@ jobs:
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p $ANDROID_AVD_HOME
-          # Reverted back to google_apis because WhiteMAX crashes on clean AOSP
+          # Using google_apis because WhiteMAX requires it
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
-          
-          # MAXIMUM PERFORMANCE SETTINGS
-          # Keep at 2 cores because GitHub Actions KVM only supports 2. 4 cores triggers a blocking Qt warning popup!
-          echo "hw.cpu.ncore=2" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.ramSize=3072" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "vm.heapSize=512" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
           # Exact 720p Resolution Setup
           echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
           avdmanager list avd
 
@@ -135,17 +129,33 @@ jobs:
           WID=$(xdotool search --sync --onlyvisible --class "qemu" | head -1 || echo "")
           if [ ! -z "$WID" ]; then
             echo "Resizing emulator window $WID to 720x1280"
+            xdotool windowactivate $WID
+            # Send Enter key to dismiss any Qt warning dialogs!
+            xdotool key Return
             xdotool windowsize $WID 720 1280
             xdotool windowmove $WID 0 0
           else
             echo "Failed to find emulator window with xdotool"
           fi
 
-          $ANDROID_HOME/platform-tools/adb wait-for-device
+          $ANDROID_HOME/platform-tools/adb wait-for-device || true
           echo "Waiting for full boot..."
           for i in $(seq 1 90); do
             boot=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            [ "$boot" = "1" ] && echo "Booted!" && break
+            if [ "$boot" = "1" ]; then
+              echo "Booted!"
+              break
+            fi
+            
+            # Auto-fix ADB if the device goes offline during a heavy boot
+            state=$($ANDROID_HOME/platform-tools/adb get-state 2>/dev/null || echo "offline")
+            if [ "$state" = "offline" ]; then
+              echo "Device offline, restarting adb daemon..."
+              $ANDROID_HOME/platform-tools/adb kill-server
+              $ANDROID_HOME/platform-tools/adb start-server
+              $ANDROID_HOME/platform-tools/adb reconnect offline || true
+            fi
+            
             sleep 5
           done
 
@@ -159,18 +169,22 @@ jobs:
       - name: Install and launch Max
         run: |
           echo "Installing Max APK..."
+          # Restart adb just in case before installation
+          $ANDROID_HOME/platform-tools/adb kill-server
+          $ANDROID_HOME/platform-tools/adb start-server
+          
           $ANDROID_HOME/platform-tools/adb install -r max.apk || true
           
           # --- TRUE KIOSK MODE & PERFORMANCE ---
           $ANDROID_HOME/platform-tools/adb shell settings put secure lockscreen.disabled 1
           
           echo "Killing System UI for True Kiosk Mode..."
-          $ANDROID_HOME/platform-tools/adb shell pm disable-user --user 0 com.android.systemui
+          $ANDROID_HOME/platform-tools/adb shell pm disable-user --user 0 com.android.systemui || true
           
           echo "Disabling animations for maximum speed..."
-          $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0
-          $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0
-          $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0
+          $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0 || true
+          $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0 || true
+          $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0 || true
           
           PACKAGE_NAME=$(aapt dump badging max.apk | grep package | grep -oP "name='\K[^']+")
           echo "Detected package name: $PACKAGE_NAME"
