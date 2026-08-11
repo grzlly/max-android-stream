@@ -78,7 +78,7 @@ jobs:
                   setTimeout(function() {
                       document.getElementById('loading').style.display = 'none';
                       var f = document.getElementById('vnc-frame');
-                      f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
+                      f.src = 'vnc.html?autoconnect=true&resize=scale&show_dot=true';
                       f.style.display = 'block';
                       f.onload = function() {
                           try {
