@@ -38,33 +38,33 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create AVD
+      - name: Create AVD (Top Tier Performance)
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p $ANDROID_AVD_HOME
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
           
-          # Optimizations for maximum performance on 2 CPU cores
-          echo "hw.cpu.ncore=2" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.ramSize=3072" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          # MAXIMUM PERFORMANCE SETTINGS
+          echo "hw.cpu.ncore=4" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.ramSize=4096" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "vm.heapSize=512" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
-          # Explicitly set resolution of Android device internally
+          # Exact 720p Resolution Setup
           echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
           avdmanager list avd
 
-      - name: Setup Web UI
+      - name: Setup Web UI (Scale OFF by default)
         run: |
           cat << 'EOF' | sudo tee /usr/share/novnc/index.html
           <!DOCTYPE html>
@@ -84,7 +84,8 @@ jobs:
                   setTimeout(() => {
                       document.getElementById('loading').style.display = 'none';
                       const f = document.getElementById('vnc-frame');
-                      f.src = 'vnc.html?autoconnect=true&resize=scale&show_dot=true';
+                      // resize=off fixes the tiny vertical line issue on desktop!
+                      f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
                       f.style.display = 'block';
                   }, 5000);
               </script>
@@ -105,11 +106,12 @@ jobs:
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           
+          # Pure borderless setup via fluxbox
           mkdir -p ~/.fluxbox
           cat << 'EOF' > ~/.fluxbox/apps
           [app] (.*)
             [Deco] {NONE}
-            [Maximized] {yes}
+            [Position] (UPPERLEFT) {0 0}
           [end]
           EOF
           cat << 'EOF' > ~/.fluxbox/init
@@ -117,12 +119,25 @@ jobs:
           EOF
           fluxbox -display :0 &
           
-          # Native Emulator Window MUST be launched normally (NO -no-skin, NO -no-window)
-          # Otherwise it shrinks to a tiny box. The standard skin will be maximized perfectly by fluxbox.
+          # Native Emulator Window WITHOUT hardware buttons (-no-skin)
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-snapshot &
+            -no-snapshot \
+            -no-skin &
+
+          echo "Waiting for emulator window to appear..."
+          sleep 10
+          
+          # Force the window to exactly fill the 720x1280 screen, removing ALL black borders
+          WID=$(xdotool search --sync --onlyvisible --class "qemu" | head -1 || echo "")
+          if [ ! -z "$WID" ]; then
+            echo "Resizing emulator window $WID to 720x1280"
+            xdotool windowsize $WID 720 1280
+            xdotool windowmove $WID 0 0
+          else
+            echo "Failed to find emulator window with xdotool"
+          fi
 
           $ANDROID_HOME/platform-tools/adb wait-for-device
           echo "Waiting for full boot..."
@@ -132,8 +147,8 @@ jobs:
             sleep 5
           done
 
-          # Run x11vnc targeting the Xvfb screen
-          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared
+          # Run x11vnc with performance tuning (60fps feel)
+          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           
           # noVNC websockify on port 8000
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
