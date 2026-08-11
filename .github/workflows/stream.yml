@@ -35,52 +35,52 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify wget unzip openjdk-17-jdk
+          sudo apt-get install -y xvfb x11vnc novnc websockify unzip openjdk-17-jdk wget
 
-      - name: Setup Android SDK
+      - name: Setup Android SDK and Create AVD
         run: |
+          set -e
+          mkdir -p $HOME/android-sdk/cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
           unzip -q cmdtools.zip -d /tmp/cmdtools
-          mkdir -p $HOME/android-sdk/cmdline-tools
           mv /tmp/cmdtools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$HOME/android-sdk/emulator" >> $GITHUB_PATH
-          echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-
-      - name: Install emulator + system image
-        run: |
+          
           export ANDROID_HOME=$HOME/android-sdk
-          yes | sdkmanager --licenses > /dev/null 2>&1
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
+          
+          echo "Accepting licenses..."
+          yes | sdkmanager --licenses >/dev/null
+          
+          echo "Installing packages..."
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
-
-      - name: Create AVD
-        run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          echo "no" | avdmanager create avd \
-            -n max_device \
-            -k "system-images;android-30;google_apis;x86_64"
+          
+          echo "Creating AVD..."
+          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
+          
+          echo "Checking AVDs..."
+          avdmanager list avd
 
       - name: Start virtual display + emulator + VNC
         run: |
           export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
           
           # Virtual display 1080x1920
           Xvfb :0 -screen 0 1080x1920x24 &
           export DISPLAY=:0
           
           # Start emulator
-          $HOME/android-sdk/emulator/emulator @max_device \
+          emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
             -skin 1080x1920 &
 
           # Wait for boot
-          $HOME/android-sdk/platform-tools/adb wait-for-device
+          adb wait-for-device
           echo "Waiting for full boot..."
           for i in $(seq 1 90); do
-            boot=$($HOME/android-sdk/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$boot" = "1" ] && echo "Booted!" && break
             sleep 5
           done
@@ -95,11 +95,12 @@ jobs:
       - name: Install and launch Max
         run: |
           export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
+          
           echo "Installing Max APK..."
-          $HOME/android-sdk/platform-tools/adb install -r max.apk
+          adb install -r max.apk || true
           echo "Launching Max..."
-          $HOME/android-sdk/platform-tools/adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1
-          echo "Max launched"
+          adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1 || true
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
