@@ -190,7 +190,7 @@ jobs:
           echo "scrcpy rendering Android screen at 30fps"
 
           # 8. Start VNC capturing ONLY the 720x1280 region where scrcpy is
-          x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
+          x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -noncache -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
           echo "noVNC running on :8000"
 
