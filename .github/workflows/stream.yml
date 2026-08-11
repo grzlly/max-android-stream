@@ -130,7 +130,6 @@ jobs:
           echo "Emulator started (PID: $EMU_PID)"
 
           # 5. Run popup-dismisser in BACKGROUND (parallel, not sequential!)
-          # Targets the actively focused window, works regardless of popup timing.
           export DISPLAY=:0
           (
             sleep 5
@@ -228,7 +227,8 @@ jobs:
           $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
           $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
 
-          PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+")
+          # FIX: head -1 and strip whitespace to get only the package name, no extra lines
+          PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+" | head -1 | tr -d '[:space:]')
           echo "Package: $PACKAGE_NAME"
 
           echo "Launching Max..."
