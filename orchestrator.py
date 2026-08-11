@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, render_template_string, jsonify
 import time
 import subprocess
 import threading
@@ -13,41 +13,64 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Max Emulator</title>
+    <title>Max</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { margin: 0; padding: 0; background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
-        iframe { width: 100vw; height: 100vh; border: none; display: none; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-        .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a0a; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; overflow: hidden; }
+        #vnc-frame { width: 100%; height: 100vh; border: none; display: none; background: #000; }
+        #loading {
+            position: fixed; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 20px; background: #0a0a0a;
+        }
+        .logo { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; color: #fff; }
+        .logo span { color: #e50914; }
+        .spinner {
+            width: 44px; height: 44px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #e50914;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status { font-size: 0.9rem; color: rgba(255,255,255,0.4); }
     </style>
     <script>
         let iframeLoaded = false;
+
+        // Keep-alive ping
         setInterval(() => {
-            fetch('/ping').then(r => r.json()).then(d => { if(!d.ok) window.location.reload(); }).catch(()=>{});
+            fetch('/ping').then(r => r.json()).then(d => {
+                if (!d.ok) window.location.reload();
+            }).catch(() => {});
         }, 3000);
-        let checkReady = setInterval(() => {
+
+        // Poll until emulator ready
+        const checkReady = setInterval(() => {
             if (iframeLoaded) { clearInterval(checkReady); return; }
             fetch('/status').then(r => r.json()).then(d => {
-                if(d.ready) {
+                if (d.ready) {
                     document.getElementById('loading').style.display = 'none';
-                    let f = document.getElementById('emulator-frame');
+                    const f = document.getElementById('vnc-frame');
+                    // Open raw noVNC client — no docker-android branding
+                    f.src = '/novnc/vnc.html?autoconnect=true&resize=scale&show_dot=true';
                     f.style.display = 'block';
-                    f.src = '/novnc/';
                     iframeLoaded = true;
                     clearInterval(checkReady);
                 }
-            }).catch(()=>{});
+            }).catch(() => {});
         }, 2000);
     </script>
 </head>
 <body>
     <div id="loading">
+        <div class="logo">M<span>A</span>X</div>
         <div class="spinner"></div>
-        <h2>Запуск эмулятора...</h2>
-        <p>Подождите 60-90 секунд.</p>
+        <p class="status">Запуск... подождите 60-90 секунд</p>
     </div>
-    <iframe id="emulator-frame"></iframe>
+    <iframe id="vnc-frame" allowfullscreen></iframe>
 </body>
 </html>
 """
@@ -56,22 +79,41 @@ def setup_emulator():
     global is_ready
     with setup_lock:
         is_ready = False
-        print("Waiting for Android to boot...")
+        print("Waiting for Android boot...")
         for _ in range(120):
-            res = subprocess.run(["docker", "exec", "android-max", "adb", "shell", "getprop", "sys.boot_completed"],
-                                 capture_output=True, text=True)
+            res = subprocess.run(
+                ["docker", "exec", "android-max", "adb", "shell", "getprop", "sys.boot_completed"],
+                capture_output=True, text=True
+            )
             if "1" in res.stdout:
+                print("Android booted!")
                 break
             time.sleep(5)
-        res = subprocess.run(["docker", "exec", "android-max", "adb", "shell", "pm", "list", "packages", "com.vk.im"],
-                             capture_output=True, text=True)
+
+        # Check if Max is installed
+        res = subprocess.run(
+            ["docker", "exec", "android-max", "adb", "shell", "pm", "list", "packages", "com.vk.im"],
+            capture_output=True, text=True
+        )
         if "com.vk.im" not in res.stdout:
-            print("Installing APK...")
-            subprocess.run(["docker", "exec", "android-max", "adb", "install", "-r", "/root/max.apk"], check=False)
+            print("Installing Max APK...")
+            subprocess.run(
+                ["docker", "exec", "android-max", "adb", "install", "-r", "/root/max.apk"],
+                check=False, timeout=120
+            )
         else:
-            subprocess.run(["docker", "exec", "android-max", "adb", "shell", "pm", "clear", "com.vk.im"], check=False)
-        subprocess.run(["docker", "exec", "android-max", "adb", "shell", "monkey",
-                        "-p", "com.vk.im", "-c", "android.intent.category.LAUNCHER", "1"], check=False)
+            print("App installed, clearing data...")
+            subprocess.run(
+                ["docker", "exec", "android-max", "adb", "shell", "pm", "clear", "com.vk.im"],
+                check=False
+            )
+
+        # Launch Max
+        subprocess.run(
+            ["docker", "exec", "android-max", "adb", "shell", "monkey",
+             "-p", "com.vk.im", "-c", "android.intent.category.LAUNCHER", "1"],
+            check=False
+        )
         time.sleep(3)
         is_ready = True
         print("Ready!")
