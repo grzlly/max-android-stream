@@ -38,21 +38,23 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils scrcpy
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils x11-xserver-utils scrcpy
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create AVD
+      - name: Create AVD (Samsung S10 Proportions)
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p $ANDROID_AVD_HOME
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
 
-          echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          # Force exactly 720x1520 (Samsung S10 19:9 ratio)
+          grep -q "^hw.lcd.width=" $ANDROID_AVD_HOME/max_device.avd/config.ini && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/' $ANDROID_AVD_HOME/max_device.avd/config.ini || echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          grep -q "^hw.lcd.height=" $ANDROID_AVD_HOME/max_device.avd/config.ini && sed -i 's/^hw.lcd.height=.*/hw.lcd.height=1520/' $ANDROID_AVD_HOME/max_device.avd/config.ini || echo "hw.lcd.height=1520" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          grep -q "^hw.lcd.density=" $ANDROID_AVD_HOME/max_device.avd/config.ini && sed -i 's/^hw.lcd.density=.*/hw.lcd.density=320/' $ANDROID_AVD_HOME/max_device.avd/config.ini || echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes"    >> $ANDROID_AVD_HOME/max_device.avd/config.ini
 
@@ -66,30 +68,20 @@ jobs:
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-              <title>Max Emulator</title>
+              <title>Max Emulator (S10)</title>
               <style>
-                  body { margin: 0; padding: 0; background: #111; color: white; overflow: hidden; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
-                  /* Ensure absolute clipping to physically prevent any scrollbar generation */
-                  #wrapper { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-                  iframe { width: 720px !important; height: 1280px !important; border: none; flex-shrink: 0; transform-origin: center center; }
-                  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; font-family: sans-serif; }
+                  body { margin: 0; padding: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+                  iframe { width: 100%; height: 100%; border: none; }
+                  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
                   .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
                   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
               </style>
               <script>
-                  function updateScale() {
-                      var f = document.getElementById('vnc-frame');
-                      var scale = Math.min(window.innerWidth / 720, window.innerHeight / 1280);
-                      f.style.transform = 'scale(' + scale + ')';
-                  }
-
                   setTimeout(function() {
                       document.getElementById('loading').style.display = 'none';
                       var f = document.getElementById('vnc-frame');
                       f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
                       f.style.display = 'block';
-                      updateScale();
-                      window.addEventListener('resize', updateScale);
                       f.onload = function() {
                           try {
                               var bar = f.contentDocument.getElementById('noVNC_control_bar_anchor');
@@ -102,13 +94,10 @@ jobs:
           <body>
               <div id="loading">
                   <div class="spinner"></div>
-                  <h2>Установка и запуск эмулятора...</h2>
+                  <h2>Установка эмулятора (S10)...</h2>
                   <p>Пожалуйста, подождите (до 60-90 секунд).</p>
               </div>
-              <div id="wrapper">
-                  <!-- scrolling="no" absolutely forbids browser from drawing scrollbars here -->
-                  <iframe id="vnc-frame" scrolling="no" allowfullscreen></iframe>
-              </div>
+              <iframe id="vnc-frame" allowfullscreen></iframe>
           </body>
           </html>
           EOF
@@ -117,8 +106,8 @@ jobs:
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # 1. Xvfb at exact Android screen size
-          Xvfb :0 -screen 0 720x1280x24 &
+          # 1. Xvfb at exact Android screen size (S10 aspect ratio 19:9)
+          Xvfb :0 -screen 0 720x1520x24 &
           export DISPLAY=:0
           for i in $(seq 1 30); do
             xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
@@ -132,23 +121,20 @@ jobs:
           fluxbox -display :0 2>/dev/null &
           sleep 2
           
-          # Force the X11 root background to pure black so the Ubuntu logo disappears
+          # Force the X11 root background to pure black
           xsetroot -solid black -display :0 &
 
           # 3. Start ADB before emulator
           $ADB start-server
           echo "ADB daemon started"
 
-          # 4. Start emulator with -no-window:
-          #    - No Qt window = NO popup dialogs (cpu warning, nested virt, etc.)
-          #    - NO emulator sidebar/toolbar visible
-          #    - Runs fully headless, ADB still works
+          # 4. Start emulator fully headless
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot -no-skin -no-metrics \
             -no-window &
-          echo "Emulator started in headless mode (no window = no popups, no sidebar)"
+          echo "Emulator started in headless mode"
 
           # 5. Wait for ADB online (up to 3 min)
           echo "Waiting for ADB..."
