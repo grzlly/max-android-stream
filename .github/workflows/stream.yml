@@ -100,6 +100,8 @@ jobs:
 
       - name: Start display, emulator and VNC
         run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+
           # 1. Start Xvfb and wait until ready
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
@@ -116,8 +118,12 @@ jobs:
           fluxbox -display :0 2>/dev/null &
           sleep 2
 
+          # CRITICAL: Start ADB daemon BEFORE the emulator so it can connect on boot
+          echo "Starting ADB daemon before emulator..."
+          $ADB start-server
+          echo "ADB daemon started."
+
           # 3. Start emulator
-          # NOTE: Do NOT use -display flag - emulator uses DISPLAY env var automatically
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio \
             -no-boot-anim \
@@ -126,25 +132,26 @@ jobs:
             -no-skin \
             -no-metrics &
 
-          echo "Emulator started, waiting for Qt window..."
+          echo "Emulator process started."
 
-          # 4. Wait up to 90s for the emulator window, then dismiss popups and resize
-          WID=""
-          for i in $(seq 1 90); do
-            WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
-            if [ -n "$WID" ]; then
-              echo "Found emulator window: $WID"
-              break
-            fi
+          # 4. Dismiss Qt popup dialogs every second for the first 60 seconds.
+          # We press Return on the active window (no window ID needed - targets whatever has focus).
+          # This reliably dismisses the "4 CPU cores" and any other blocking dialogs.
+          echo "Dismissing any Qt popup dialogs for 60 seconds..."
+          for i in $(seq 1 60); do
+            xdotool key --clearmodifiers Return 2>/dev/null || true
             sleep 1
           done
+          echo "Popup dismissal loop done."
 
+          # 5. Resize the emulator window to fill the screen exactly
+          WID=""
+          for i in $(seq 1 30); do
+            WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
+            [ -n "$WID" ] && echo "Found emulator window: $WID" && break
+            sleep 1
+          done
           if [ -n "$WID" ]; then
-            xdotool windowactivate "$WID" 2>/dev/null || true
-            for j in 1 2 3; do
-              xdotool key --window "$WID" Return 2>/dev/null || true
-              sleep 1
-            done
             xdotool windowsize "$WID" 720 1280 2>/dev/null || true
             xdotool windowmove "$WID" 0 0 2>/dev/null || true
             echo "Window resized to 720x1280"
@@ -152,39 +159,36 @@ jobs:
             echo "WARNING: emulator window not found via xdotool"
           fi
 
-          # 5. Wait for ADB to be online (up to 3 min)
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          echo "Waiting for ADB..."
+          # 6. Wait for ADB device to be online
+          # Use emulator-5554 serial explicitly since we know the emulator uses that port
+          echo "Waiting for ADB device to come online..."
           for i in $(seq 1 36); do
-            STATE=$($ADB get-state 2>/dev/null || echo "unknown")
+            STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
             if [ "$STATE" = "device" ]; then
-              echo "ADB online!"
+              echo "ADB online! (state=device)"
               break
             fi
             if [ "$STATE" = "offline" ]; then
-              echo "ADB offline, reconnecting..."
-              $ADB kill-server 2>/dev/null || true
-              sleep 2
-              $ADB start-server 2>/dev/null || true
-              $ADB reconnect 2>/dev/null || true
+              echo "Device offline, running reconnect..."
+              $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
             fi
             echo "ADB state: $STATE ($i/36)"
             sleep 5
           done
 
-          # 6. Wait for Android boot_completed
-          echo "Waiting for Android to boot..."
+          # 7. Wait for Android to finish booting
+          echo "Waiting for Android boot..."
           for i in $(seq 1 60); do
-            BOOT=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            [ "$BOOT" = "1" ] && echo "Android booted!" && break
-            echo "Boot: $BOOT ($i/60)"
+            BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            [ "$BOOT" = "1" ] && echo "Android fully booted!" && break
+            echo "Boot: '$BOOT' ($i/60)"
             sleep 5
           done
 
-          # Extra settle time for Google Play Services
+          # Let Google Play Services settle
           sleep 5
 
-          # 7. Start VNC + noVNC
+          # 8. Start VNC + noVNC
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
           echo "noVNC running on :8000"
@@ -193,34 +197,42 @@ jobs:
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # Fresh ADB for this step
+          # Reconnect ADB cleanly for this step
           $ADB kill-server 2>/dev/null || true
           sleep 2
           $ADB start-server
+          sleep 2
 
-          STATE=$($ADB get-state 2>/dev/null || echo "unknown")
+          STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
           echo "ADB state: $STATE"
           if [ "$STATE" != "device" ]; then
-            echo "ERROR: Device not ready! State=$STATE"
-            $ADB devices -l
-            exit 1
+            # One more attempt to recover
+            $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
+            sleep 5
+            STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
+            echo "ADB state after recovery: $STATE"
+            if [ "$STATE" != "device" ]; then
+              echo "ERROR: Device not ready! State=$STATE"
+              $ADB devices -l
+              exit 1
+            fi
           fi
 
           echo "Installing Max APK..."
-          $ADB install -r max.apk
+          $ADB -s emulator-5554 install -r max.apk
 
           echo "Applying Kiosk Mode..."
-          $ADB shell settings put secure lockscreen.disabled 1
-          $ADB shell pm disable-user --user 0 com.android.systemui
-          $ADB shell settings put global window_animation_scale 0
-          $ADB shell settings put global transition_animation_scale 0
-          $ADB shell settings put global animator_duration_scale 0
+          $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.systemui
+          $ADB -s emulator-5554 shell settings put global window_animation_scale 0
+          $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
+          $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
 
           PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+")
           echo "Package: $PACKAGE_NAME"
 
           echo "Launching Max..."
-          $ADB shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
+          $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
