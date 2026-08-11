@@ -212,17 +212,50 @@ jobs:
 
           echo "Applying Kiosk Mode..."
           $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
+          
           # Keep System UI enabled so user has back/home buttons if they get stuck in browser
           # $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.systemui
+          
           $ADB -s emulator-5554 shell settings put global window_animation_scale 0
           $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
           $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
+
+          # Disable Chrome to prevent external links from opening in a browser
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.chrome >/dev/null 2>&1 || true
 
           PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+" | head -1 | tr -d '[:space:]')
           echo "Package: $PACKAGE_NAME"
 
           echo "Launching Max..."
           $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
+
+          echo "Starting foreground watchdog..."
+          (
+            while true; do
+              # Get the currently focused window's package name
+              FOCUS=$($ADB -s emulator-5554 shell dumpsys window windows 2>/dev/null | grep -E 'mCurrentFocus' | awk -F'/' '{print $1}' | awk '{print $NF}' | tr -d '\r')
+              
+              if [ -n "$FOCUS" ] && [ "$FOCUS" != "mCurrentFocus=null" ]; then
+                # Whitelist our app and core system UI components
+                if [ "$FOCUS" != "$PACKAGE_NAME" ] && \
+                   [ "$FOCUS" != "com.android.permissioncontroller" ] && \
+                   [ "$FOCUS" != "com.android.systemui" ] && \
+                   [ "$FOCUS" != "com.google.android.inputmethod.latin" ]; then
+                  
+                  echo "Watchdog: Unwanted app $FOCUS is in foreground. Killing it and relaunching $PACKAGE_NAME..."
+                  
+                  # Force stop the interfering app (unless it's core android)
+                  if [ "$FOCUS" != "android" ]; then
+                    $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
+                  fi
+                  
+                  # Relaunch Max
+                  $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+                fi
+              fi
+              sleep 2
+            done
+          ) &
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
