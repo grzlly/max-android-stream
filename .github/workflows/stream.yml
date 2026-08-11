@@ -47,13 +47,14 @@ jobs:
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p $ANDROID_AVD_HOME
-          # Switch to 'default' instead of 'google_apis' to save ~1GB of RAM and speed up boot!
-          sdkmanager "emulator" "platform-tools" "system-images;android-30;default;x86_64"
-          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;default;x86_64" --force
+          # Reverted back to google_apis because WhiteMAX crashes on clean AOSP
+          sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
+          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
           
           # MAXIMUM PERFORMANCE SETTINGS
-          echo "hw.cpu.ncore=4" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.ramSize=4096" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          # Keep at 2 cores because GitHub Actions KVM only supports 2. 4 cores triggers a blocking Qt warning popup!
+          echo "hw.cpu.ncore=2" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.ramSize=3072" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "vm.heapSize=512" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
