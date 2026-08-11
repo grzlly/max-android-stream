@@ -38,7 +38,8 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt
+          # Added xdotool to force window size and position
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -105,12 +106,11 @@ jobs:
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           
-          # Setup minimal window manager to strip borders and position at 0,0
+          # Setup minimal window manager to strip borders
           mkdir -p ~/.fluxbox
           cat << 'EOF' > ~/.fluxbox/apps
           [app] (.*)
             [Deco] {NONE}
-            [Position] (UPPERLEFT) {0 0}
           [end]
           EOF
           cat << 'EOF' > ~/.fluxbox/init
@@ -124,6 +124,20 @@ jobs:
             -gpu swiftshader_indirect \
             -no-snapshot \
             -no-skin &
+
+          # --- THE MAGIC TRICK ---
+          # Continuously search for the emulator window and forcefully resize it to 720x1280
+          # and move it to coordinates 0,0. This guarantees it will perfectly fill the Xvfb screen.
+          (
+            while true; do
+              WIDS=$(xdotool search --onlyvisible ".*" 2>/dev/null || true)
+              for WID in $WIDS; do
+                xdotool windowsize $WID 720 1280 2>/dev/null || true
+                xdotool windowmove $WID 0 0 2>/dev/null || true
+              done
+              sleep 1
+            done
+          ) &
 
           # Wait for boot
           $ANDROID_HOME/platform-tools/adb wait-for-device
