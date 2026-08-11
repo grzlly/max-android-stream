@@ -50,7 +50,6 @@ jobs:
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
 
-          # 720p screen, GPU on, physical keyboard enabled
           echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
@@ -61,7 +60,7 @@ jobs:
 
       - name: Setup Web UI
         run: |
-          cat << 'HTMLEOF' | sudo tee /usr/share/novnc/index.html
+          cat << 'EOF' | sudo tee /usr/share/novnc/index.html
           <!DOCTYPE html>
           <html>
           <head>
@@ -97,11 +96,11 @@ jobs:
               <iframe id="vnc-frame" allowfullscreen></iframe>
           </body>
           </html>
-          HTMLEOF
+          EOF
 
-      - name: Start display, window manager, emulator and VNC
+      - name: Start display, emulator and VNC
         run: |
-          # --- 1. Start Xvfb and WAIT until it is ready ---
+          # 1. Start Xvfb and wait until ready
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           echo "Waiting for Xvfb..."
@@ -110,21 +109,15 @@ jobs:
             sleep 1
           done
 
-          # --- 2. Start fluxbox (borderless, no toolbar) ---
+          # 2. Fluxbox: borderless windows, no toolbar
+          # Using printf to avoid heredoc-inside-heredoc YAML issues
           mkdir -p ~/.fluxbox
-          cat > ~/.fluxbox/apps << 'FBEOF'
-[app] (.*)
-  [Deco] {NONE}
-  [Position] (UPPERLEFT) {0 0}
-[end]
-FBEOF
-          cat > ~/.fluxbox/init << 'FBEOF'
-session.screen0.toolbar.visible: false
-FBEOF
+          printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
+          printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
           fluxbox -display :0 2>/dev/null &
           sleep 2
 
-          # --- 3. Start emulator (no-skin, no-metrics to suppress Qt popups) ---
+          # 3. Start emulator
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio \
             -no-boot-anim \
@@ -134,10 +127,9 @@ FBEOF
             -no-metrics \
             -display :0 &
 
-          echo "Emulator launched, waiting for its window and dismissing any popups..."
+          echo "Emulator started, waiting for Qt window..."
 
-          # --- 4. Wait for the emulator Qt window, then dismiss popups & resize ---
-          # Loop up to 90 seconds waiting for the qemu window to appear
+          # 4. Wait up to 90s for the emulator window, then dismiss popups and resize
           WID=""
           for i in $(seq 1 90); do
             WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
@@ -150,27 +142,24 @@ FBEOF
 
           if [ -n "$WID" ]; then
             xdotool windowactivate "$WID" 2>/dev/null || true
-            # Press Enter/Return several times with pauses to dismiss any warning dialogs
             for j in 1 2 3; do
               xdotool key --window "$WID" Return 2>/dev/null || true
               sleep 1
             done
             xdotool windowsize "$WID" 720 1280 2>/dev/null || true
             xdotool windowmove "$WID" 0 0 2>/dev/null || true
-            echo "Window resized and positioned."
+            echo "Window resized to 720x1280"
           else
-            echo "WARNING: Could not find emulator window via xdotool."
+            echo "WARNING: emulator window not found via xdotool"
           fi
 
-          # --- 5. Wait for ADB device to be fully online (not just boot_completed) ---
-          echo "Waiting for ADB device to come online..."
+          # 5. Wait for ADB to be online (up to 3 min)
           ADB="$ANDROID_HOME/platform-tools/adb"
-
-          # Give emulator up to 3 minutes to have a stable online ADB connection
+          echo "Waiting for ADB..."
           for i in $(seq 1 36); do
             STATE=$($ADB get-state 2>/dev/null || echo "unknown")
             if [ "$STATE" = "device" ]; then
-              echo "ADB is online (state=device)"
+              echo "ADB online!"
               break
             fi
             if [ "$STATE" = "offline" ]; then
@@ -180,65 +169,55 @@ FBEOF
               $ADB start-server 2>/dev/null || true
               $ADB reconnect 2>/dev/null || true
             fi
-            echo "ADB state: $STATE, waiting... ($i/36)"
+            echo "ADB state: $STATE ($i/36)"
             sleep 5
           done
 
-          # Wait for Android to fully boot
-          echo "Waiting for Android boot_completed..."
+          # 6. Wait for Android boot_completed
+          echo "Waiting for Android to boot..."
           for i in $(seq 1 60); do
             BOOT=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
-            echo "Boot status: $BOOT ($i/60)"
+            echo "Boot: $BOOT ($i/60)"
             sleep 5
           done
 
-          # Small extra wait to let Google Play services settle
+          # Extra settle time for Google Play Services
           sleep 5
 
-          # --- 6. Start VNC ---
+          # 7. Start VNC + noVNC
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
-          echo "noVNC is running on :8000"
+          echo "noVNC running on :8000"
 
       - name: Install Max and apply Kiosk Mode
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # Fresh ADB connection for this step
+          # Fresh ADB for this step
           $ADB kill-server 2>/dev/null || true
           sleep 2
           $ADB start-server
 
-          # Confirm device is still online
           STATE=$($ADB get-state 2>/dev/null || echo "unknown")
-          echo "ADB state before install: $STATE"
+          echo "ADB state: $STATE"
           if [ "$STATE" != "device" ]; then
-            echo "ERROR: Device not ready for install! State=$STATE"
+            echo "ERROR: Device not ready! State=$STATE"
             $ADB devices -l
             exit 1
           fi
 
-          # Install APK
           echo "Installing Max APK..."
           $ADB install -r max.apk
 
-          # --- Kiosk Mode ---
           echo "Applying Kiosk Mode..."
-
-          # Disable lock screen
           $ADB shell settings put secure lockscreen.disabled 1
-
-          # Kill SystemUI completely (removes status bar, nav bar, notification shade)
           $ADB shell pm disable-user --user 0 com.android.systemui
-
-          # Kill all animations (instant app response)
           $ADB shell settings put global window_animation_scale 0
           $ADB shell settings put global transition_animation_scale 0
           $ADB shell settings put global animator_duration_scale 0
 
-          # Detect package and launch
-          PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+'" | tr -d "'")
+          PACKAGE_NAME=$(aapt dump badging max.apk | grep '^package' | grep -oP "name='\K[^']+")
           echo "Package: $PACKAGE_NAME"
 
           echo "Launching Max..."
