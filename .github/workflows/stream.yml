@@ -31,7 +31,6 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
-          echo "APK: $(du -sh max.apk)"
 
       - name: Install system deps
         run: |
@@ -51,34 +50,37 @@ jobs:
 
       - name: Install emulator + system image
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
           yes | sdkmanager --licenses > /dev/null 2>&1
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
 
       - name: Create AVD
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
           echo "no" | avdmanager create avd \
             -n max_device \
-            -k "system-images;android-30;google_apis;x86_64" \
-            --device "pixel_3"
+            -k "system-images;android-30;google_apis;x86_64"
 
       - name: Start virtual display + emulator + VNC
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          
           # Virtual display 1080x1920
           Xvfb :0 -screen 0 1080x1920x24 &
           export DISPLAY=:0
-          echo "DISPLAY=:0" >> $GITHUB_ENV
-
+          
           # Start emulator
           $HOME/android-sdk/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-snapshot &
+            -no-snapshot \
+            -skin 1080x1920 &
 
           # Wait for boot
-          adb wait-for-device
+          $HOME/android-sdk/platform-tools/adb wait-for-device
           echo "Waiting for full boot..."
           for i in $(seq 1 90); do
-            boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            boot=$($HOME/android-sdk/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$boot" = "1" ] && echo "Booted!" && break
             sleep 5
           done
@@ -92,10 +94,11 @@ jobs:
 
       - name: Install and launch Max
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
           echo "Installing Max APK..."
-          adb install -r max.apk
+          $HOME/android-sdk/platform-tools/adb install -r max.apk
           echo "Launching Max..."
-          adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1
+          $HOME/android-sdk/platform-tools/adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1
           echo "Max launched"
 
       - name: Open SSH Reverse Tunnel to VPS
