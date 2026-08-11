@@ -38,7 +38,10 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox scrcpy aapt
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt
+          
+          # Install scrcpy properly from official repo
+          sudo apt-get install -y scrcpy
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -75,8 +78,6 @@ jobs:
                   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
               </style>
               <script>
-                  // GitHub Actions takes a while to boot the emulator.
-                  // We wait 5 seconds before showing the VNC frame.
                   setTimeout(() => {
                       document.getElementById('loading').style.display = 'none';
                       const f = document.getElementById('vnc-frame');
@@ -98,11 +99,11 @@ jobs:
 
       - name: Start virtual display + headless emulator + scrcpy
         run: |
-          # Create Xvfb screen that perfectly matches the Android display ratio
-          Xvfb :0 -screen 0 720x1280x24 &
+          # Use EXACTLY 1080x1920 for Xvfb and VNC (same as Android screen)
+          Xvfb :0 -screen 0 1080x1920x24 &
           export DISPLAY=:0
           
-          # Force any windows in Xvfb (like scrcpy) to be full screen with no borders
+          # Setup minimal window manager
           mkdir -p ~/.fluxbox
           cat << 'EOF' > ~/.fluxbox/apps
           [app] (.*)
@@ -110,15 +111,18 @@ jobs:
             [Maximized] {yes}
           [end]
           EOF
+          cat << 'EOF' > ~/.fluxbox/init
+          session.screen0.toolbar.visible: false
+          EOF
           fluxbox -display :0 &
           
-          # Start emulator HEADLESS! (-no-window kills all Qt dialogs and toolbars)
+          # Start emulator completely headless
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-window \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
-            -skin 720x1280 &
+            -skin 1080x1920 &
 
           # Wait for boot
           $ANDROID_HOME/platform-tools/adb wait-for-device
@@ -129,12 +133,14 @@ jobs:
             sleep 5
           done
 
-          # Use scrcpy to stream the pure Android display into the Xvfb screen
-          # This guarantees ZERO black borders and NO emulator toolbars.
-          LIBGL_ALWAYS_SOFTWARE=1 scrcpy &
+          # Stream purely the device screen to X11 (fullscreen)
+          # -m 1080 sets max resolution to 1080p
+          # -b 4M limits bitrate for performance
+          scrcpy -m 1080 -b 4M --window-borderless --fullscreen &
+          sleep 3
 
-          # x11vnc with performance tuning
-          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared
+          # Run x11vnc targeting exactly the top left corner (geometry 1080x1920)
+          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -clip 1080x1920+0+0
 
           # noVNC websockify on port 8000
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
@@ -146,13 +152,9 @@ jobs:
           $ANDROID_HOME/platform-tools/adb install -r max.apk || true
           
           # --- KIOSK MODE SETUP ---
-          # 1. Disable the lock screen (no swipe to unlock needed)
           $ANDROID_HOME/platform-tools/adb shell settings put secure lockscreen.disabled 1
-          
-          # 2. Hide status bar (top) and navigation bar (bottom) completely
           $ANDROID_HOME/platform-tools/adb shell settings put global policy_control immersive.full=*
           
-          # Dynamically detect exact package name from APK
           PACKAGE_NAME=$(aapt dump badging max.apk | grep package | grep -oP "name='\K[^']+")
           echo "Detected package name: $PACKAGE_NAME"
           
