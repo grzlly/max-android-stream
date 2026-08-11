@@ -38,7 +38,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt scrcpy
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -56,11 +56,6 @@ jobs:
           echo "vm.heapSize=512" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          
-          # Force PORTRAIT mode for mobile phones
-          echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           
           avdmanager list avd
 
@@ -102,43 +97,25 @@ jobs:
 
       - name: Start virtual display + headless emulator + VNC
         run: |
-          # Use 720x1280 (Portrait) for Xvfb
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           
-          # Setup minimal window manager to strip borders and position at 0,0
           mkdir -p ~/.fluxbox
           cat << 'EOF' > ~/.fluxbox/apps
           [app] (.*)
             [Deco] {NONE}
-            [Position] (UPPERLEFT) {0 0}
+            [Maximized] {yes}
           [end]
-          EOF
-          cat << 'EOF' > ~/.fluxbox/init
-          session.screen0.toolbar.visible: false
           EOF
           fluxbox -display :0 &
           
-          # Start emulator on Xvfb with exact resolution skin to prevent shrinking
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
+            -no-window \
             -skin 720x1280 &
 
-          # Continuously search for the emulator window and forcefully resize it to 720x1280
-          (
-            while true; do
-              WIDS=$(xdotool search --onlyvisible ".*" 2>/dev/null || true)
-              for WID in $WIDS; do
-                xdotool windowsize $WID 720 1280 2>/dev/null || true
-                xdotool windowmove $WID 0 0 2>/dev/null || true
-              done
-              sleep 1
-            done
-          ) &
-
-          # Wait for boot
           $ANDROID_HOME/platform-tools/adb wait-for-device
           echo "Waiting for full boot..."
           for i in $(seq 1 90); do
@@ -147,8 +124,11 @@ jobs:
             sleep 5
           done
 
-          # Run x11vnc targeting exactly 720x1280
-          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -clip 720x1280+0+0
+          # Capture and mirror the display
+          LIBGL_ALWAYS_SOFTWARE=1 scrcpy &
+
+          # Run x11vnc targeting the Xvfb screen
+          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared
           
           # noVNC websockify on port 8000
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
