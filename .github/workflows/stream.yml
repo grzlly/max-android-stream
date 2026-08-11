@@ -47,8 +47,9 @@ jobs:
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p $ANDROID_AVD_HOME
-          sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
-          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
+          # Switch to 'default' instead of 'google_apis' to save ~1GB of RAM and speed up boot!
+          sdkmanager "emulator" "platform-tools" "system-images;android-30;default;x86_64"
+          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;default;x86_64" --force
           
           # MAXIMUM PERFORMANCE SETTINGS
           echo "hw.cpu.ncore=4" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
@@ -159,9 +160,16 @@ jobs:
           echo "Installing Max APK..."
           $ANDROID_HOME/platform-tools/adb install -r max.apk || true
           
-          # --- KIOSK MODE SETUP ---
+          # --- TRUE KIOSK MODE & PERFORMANCE ---
           $ANDROID_HOME/platform-tools/adb shell settings put secure lockscreen.disabled 1
-          $ANDROID_HOME/platform-tools/adb shell settings put global policy_control immersive.full=*
+          
+          echo "Killing System UI for True Kiosk Mode..."
+          $ANDROID_HOME/platform-tools/adb shell pm disable-user --user 0 com.android.systemui
+          
+          echo "Disabling animations for maximum speed..."
+          $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0
+          $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0
+          $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0
           
           PACKAGE_NAME=$(aapt dump badging max.apk | grep package | grep -oP "name='\K[^']+")
           echo "Detected package name: $PACKAGE_NAME"
