@@ -69,18 +69,27 @@ jobs:
               <title>Max Emulator</title>
               <style>
                   body { margin: 0; padding: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
-                  iframe { width: 100vw; height: 100vh; border: none; display: none; }
+                  /* Strict 720x1280 to prevent noVNC internal scroll, transform applied by JS */
+                  iframe { width: 720px; height: 1280px; border: none; display: none; transform-origin: center center; }
                   #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
                   .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
                   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
               </style>
               <script>
+                  function updateScale() {
+                      var f = document.getElementById('vnc-frame');
+                      var scale = Math.min(window.innerWidth / 720, window.innerHeight / 1280);
+                      f.style.transform = 'scale(' + scale + ')';
+                  }
+
                   setTimeout(function() {
                       document.getElementById('loading').style.display = 'none';
                       var f = document.getElementById('vnc-frame');
-                      // Using resize=scale as requested to test if vertical strip issue is gone
-                      f.src = 'vnc.html?autoconnect=true&resize=scale&show_dot=true';
+                      // Restored resize=off per request
+                      f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
                       f.style.display = 'block';
+                      updateScale();
+                      window.addEventListener('resize', updateScale);
                       f.onload = function() {
                           try {
                               var bar = f.contentDocument.getElementById('noVNC_control_bar_anchor');
@@ -160,15 +169,14 @@ jobs:
           done
           sleep 5
 
-          # 7. Launch scrcpy in fullscreen mode
-          #    Using --fullscreen perfectly maps the device to the 720x1280 Xvfb screen
-          #    Without it, scrcpy restricts resolution by default
+          # 7. Launch scrcpy in fullscreen mode with 30 FPS cap
           DISPLAY=:0 scrcpy \
             -s emulator-5554 \
             --fullscreen \
+            --max-fps 30 \
             2>/dev/null &
           sleep 4
-          echo "scrcpy rendering Android screen in fullscreen"
+          echo "scrcpy rendering Android screen in fullscreen at 30fps"
 
           # 8. Start VNC capturing the full Xvfb
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
