@@ -38,7 +38,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils scrcpy
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -60,7 +60,6 @@ jobs:
 
       - name: Setup Web UI
         run: |
-          # Write the main loading page (restored original design)
           cat << 'EOF' | sudo tee /usr/share/novnc/index.html
           <!DOCTYPE html>
           <html>
@@ -69,7 +68,7 @@ jobs:
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
               <title>Max Emulator</title>
               <style>
-                  body { margin: 0; padding: 0; background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
+                  body { margin: 0; padding: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; }
                   iframe { width: 100vw; height: 100vh; border: none; display: none; }
                   #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
                   .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
@@ -81,6 +80,12 @@ jobs:
                       var f = document.getElementById('vnc-frame');
                       f.src = 'vnc.html?autoconnect=true&resize=off&show_dot=true';
                       f.style.display = 'block';
+                      f.onload = function() {
+                          try {
+                              var bar = f.contentDocument.getElementById('noVNC_control_bar_anchor');
+                              if (bar) bar.style.display = 'none';
+                          } catch(e) {}
+                      };
                   }, 7000);
               </script>
           </head>
@@ -95,59 +100,41 @@ jobs:
           </html>
           EOF
 
-          # Hide the noVNC left control bar (the panel with icons that appears on the left in the browser)
-          sudo sed -i 's|</head>|<style>#noVNC_control_bar_anchor,#noVNC_control_bar_hint{display:none!important;width:0!important;}</style></head>|' /usr/share/novnc/vnc.html
-
       - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          # 1. Start Xvfb larger than Android screen to accommodate emulator's own Qt toolbar
-          # We will crop to 720x1280 via x11vnc later
-          Xvfb :0 -screen 0 900x1400x24 &
+          # 1. Xvfb at exact Android screen size
+          Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           for i in $(seq 1 30); do
             xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
             sleep 1
           done
 
-          # 2. Fluxbox: borderless, no toolbar
+          # 2. Fluxbox: remove decorations from any window
           mkdir -p ~/.fluxbox
           printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
           fluxbox -display :0 2>/dev/null &
           sleep 2
 
-          # 3. Start ADB BEFORE the emulator
+          # 3. Start ADB before emulator
           $ADB start-server
           echo "ADB daemon started"
 
-          # 4. Start emulator
+          # 4. Start emulator with -no-window:
+          #    - No Qt window = NO popup dialogs (cpu warning, nested virt, etc.)
+          #    - NO emulator sidebar/toolbar visible
+          #    - Runs fully headless, ADB still works
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-snapshot -no-skin -no-metrics &
-          EMU_PID=$!
-          echo "Emulator started (PID: $EMU_PID)"
+            -no-snapshot -no-skin -no-metrics \
+            -no-window &
+          echo "Emulator started in headless mode (no window = no popups, no sidebar)"
 
-          # 5. Popup dismisser runs in BACKGROUND - targets active window every second
-          # Handles: "4 CPU cores" warning, "Nested Virtualization" warning, and any other dialogs
-          export DISPLAY=:0
-          (
-            sleep 8
-            echo "[dismiss] Popup dismissal started"
-            for i in $(seq 1 120); do
-              ACTIVE=$(xdotool getactivewindow 2>/dev/null || echo "")
-              if [ -n "$ACTIVE" ]; then
-                xdotool key --window "$ACTIVE" --clearmodifiers Return 2>/dev/null || true
-              fi
-              sleep 1
-            done
-            echo "[dismiss] Done"
-          ) &
-          DISMISS_PID=$!
-
-          # 6. Wait for ADB online (up to 3 min)
+          # 5. Wait for ADB online (up to 3 min)
           echo "Waiting for ADB..."
           for i in $(seq 1 36); do
             STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
@@ -162,8 +149,8 @@ jobs:
             sleep 5
           done
 
-          # 7. Wait for Android boot
-          echo "Waiting for boot..."
+          # 6. Wait for Android to fully boot
+          echo "Waiting for Android boot..."
           for i in $(seq 1 60); do
             BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
@@ -172,39 +159,22 @@ jobs:
           done
           sleep 5
 
-          # 8. Kill dismisser
-          kill $DISMISS_PID 2>/dev/null || true
+          # 7. Launch scrcpy to render the Android screen directly to the Xvfb.
+          #    --max-size 720 ensures the display is exactly 720px wide (1280 tall)
+          #    --window-borderless removes any window frame
+          #    Position at (0,0) fills the exact 720x1280 Xvfb
+          DISPLAY=:0 scrcpy \
+            -s emulator-5554 \
+            --max-size 720 \
+            --window-x 0 \
+            --window-y 0 \
+            --window-borderless \
+            2>/dev/null &
+          sleep 4
+          echo "scrcpy rendering Android screen at 720x1280"
 
-          # 9. Auto-detect emulator window geometry and position the Android screen at (0,0)
-          WID=$(xdotool search --onlyvisible --class "qemu" 2>/dev/null | head -1 || true)
-          if [ -n "$WID" ]; then
-            # Get the full emulator window size (includes Qt sidebar + title bar)
-            GEOM_LINE=$(xdotool getwindowgeometry "$WID" 2>/dev/null | grep "Geometry:" || echo "Geometry: 772x1310")
-            WIN_W=$(echo "$GEOM_LINE" | grep -oP '\d+(?=x)' | head -1 || echo "772")
-            WIN_H=$(echo "$GEOM_LINE" | grep -oP '(?<=x)\d+' | head -1 || echo "1310")
-            echo "Emulator window: ${WIN_W}x${WIN_H}"
-
-            # Sidebar = total_width - android_screen_width (720)
-            SIDEBAR=$(( WIN_W - 720 ))
-            [ "$SIDEBAR" -lt "0" ] && SIDEBAR=0
-            [ "$SIDEBAR" -gt "150" ] && SIDEBAR=52
-
-            # Title bar height = total_height - android_screen_height (1280)
-            TITLEBAR=$(( WIN_H - 1280 ))
-            [ "$TITLEBAR" -lt "0" ] && TITLEBAR=0
-            [ "$TITLEBAR" -gt "100" ] && TITLEBAR=30
-
-            echo "Sidebar: ${SIDEBAR}px, Titlebar: ${TITLEBAR}px"
-
-            # Move the window so the Android display starts exactly at (0,0)
-            xdotool windowmove "$WID" -$SIDEBAR -$TITLEBAR 2>/dev/null || true
-            echo "Android screen now at (0,0)"
-          else
-            echo "WARNING: emulator window not found"
-          fi
-
-          # 10. Start VNC: capture only 720x1280 starting from (0,0) - exactly the Android screen
-          x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
+          # 8. Start VNC capturing the full Xvfb (= exact Android screen from scrcpy)
+          x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
           websockify --web=/usr/share/novnc 8000 localhost:5900 &
           echo "noVNC running on :8000"
 
@@ -212,22 +182,13 @@ jobs:
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
 
-          $ADB kill-server 2>/dev/null || true
-          sleep 2
-          $ADB start-server
-          sleep 2
-
+          # Do NOT restart ADB - scrcpy is connected to it!
           STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
           echo "ADB state: $STATE"
           if [ "$STATE" != "device" ]; then
-            $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
-            sleep 5
-            STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
-            if [ "$STATE" != "device" ]; then
-              echo "ERROR: Device not ready! State=$STATE"
-              $ADB devices -l
-              exit 1
-            fi
+            echo "ERROR: Device not ready! State=$STATE"
+            $ADB devices -l
+            exit 1
           fi
 
           echo "Installing Max APK..."
