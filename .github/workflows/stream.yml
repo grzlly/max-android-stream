@@ -112,9 +112,9 @@ jobs:
             sleep 1
           done
 
-          # 2. Fluxbox: remove decorations from any window
+          # 2. Fluxbox: force window to fill screen
           mkdir -p ~/.fluxbox
-          printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
+          printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n  [Dimensions] {720 1280}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
           fluxbox -display :0 2>/dev/null &
           sleep 2
@@ -159,14 +159,13 @@ jobs:
           done
           sleep 5
 
-          # 7. Launch scrcpy in fullscreen mode with 30fps
+          # 7. Launch scrcpy (let fluxbox handle positioning and sizing)
           DISPLAY=:0 scrcpy \
             -s emulator-5554 \
-            --fullscreen \
             --max-fps 30 \
             2>/dev/null &
           sleep 4
-          echo "scrcpy rendering Android screen in fullscreen at 30fps"
+          echo "scrcpy rendering Android screen at 30fps"
 
           # 8. Start VNC capturing the full Xvfb
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared -defer 0
