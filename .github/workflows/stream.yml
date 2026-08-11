@@ -117,14 +117,12 @@ jobs:
           EOF
           fluxbox -display :0 &
           
-          # Native Emulator Window (No scrcpy, No xdotool)
-          # -no-skin prevents hardware buttons
-          # fluxbox [Maximized] {yes} forces the emulator window to fill 720x1280
+          # Native Emulator Window MUST be launched normally (NO -no-skin, NO -no-window)
+          # Otherwise it shrinks to a tiny box. The standard skin will be maximized perfectly by fluxbox.
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-snapshot \
-            -no-skin &
+            -no-snapshot &
 
           $ANDROID_HOME/platform-tools/adb wait-for-device
           echo "Waiting for full boot..."
