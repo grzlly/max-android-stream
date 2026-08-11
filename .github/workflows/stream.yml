@@ -38,7 +38,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox scrcpy aapt
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -109,13 +109,13 @@ jobs:
           </html>
           EOF
 
-      - name: Start virtual display + emulator + VNC
+      - name: Start virtual display + headless emulator + scrcpy
         run: |
-          # Use 720p resolution for massive performance boost in software rendering
+          # Create Xvfb screen that perfectly matches the Android display ratio
           Xvfb :0 -screen 0 720x1280x24 &
           export DISPLAY=:0
           
-          # Force emulator window to be fullscreen and borderless
+          # Force any windows in Xvfb (like scrcpy) to be full screen with no borders
           mkdir -p ~/.fluxbox
           cat << 'EOF' > ~/.fluxbox/apps
           [app] (.*)
@@ -125,8 +125,9 @@ jobs:
           EOF
           fluxbox -display :0 &
           
-          # Start emulator
+          # Start emulator HEADLESS! (-no-window kills all Qt dialogs and toolbars)
           $ANDROID_HOME/emulator/emulator @max_device \
+            -no-window \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
             -no-snapshot \
@@ -141,6 +142,10 @@ jobs:
             sleep 5
           done
 
+          # Use scrcpy to stream the pure Android display into the Xvfb screen
+          # This guarantees ZERO black borders and NO emulator toolbars.
+          LIBGL_ALWAYS_SOFTWARE=1 scrcpy &
+
           # x11vnc with performance tuning
           x11vnc -display :0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -ncache 10 -shared
 
@@ -152,8 +157,13 @@ jobs:
         run: |
           echo "Installing Max APK..."
           $ANDROID_HOME/platform-tools/adb install -r max.apk || true
+          
+          # Dynamically detect exact package name from APK
+          PACKAGE_NAME=$(aapt dump badging max.apk | grep package | grep -oP "name='\K[^']+")
+          echo "Detected package name: $PACKAGE_NAME"
+          
           echo "Launching Max..."
-          $ANDROID_HOME/platform-tools/adb shell monkey -p com.vk.im -c android.intent.category.LAUNCHER 1 || true
+          $ANDROID_HOME/platform-tools/adb shell monkey -p $PACKAGE_NAME -c android.intent.category.LAUNCHER 1 || true
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
