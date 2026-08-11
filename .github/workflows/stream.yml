@@ -1,0 +1,69 @@
+name: Max Android Stream
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: Setup SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+
+      - name: Download APK from VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
+          echo "APK: $(du -sh max.apk)"
+
+      - name: Install nginx
+        run: |
+          sudo apt-get install -y nginx
+          sudo cp nginx-local.conf /etc/nginx/nginx.conf
+          sudo nginx -t
+          sudo systemctl start nginx
+
+      - name: Start Android Emulator
+        run: |
+          docker compose up -d android-max
+          echo "Emulator started"
+
+      - name: Start Orchestrator
+        run: |
+          docker compose up -d orchestrator
+          echo "Orchestrator started"
+
+      - name: Open SSH Reverse Tunnel to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              -i ~/.ssh/vps_key \
+              -fN \
+              -R 8000:localhost:8000 \
+              root@$VPS_HOST
+          echo "Tunnel open: VPS:8000 -> localhost:8000"
+
+      - name: Keep alive (up to 5h 50min)
+        run: |
+          echo "Session active at https://max.grzly.ru"
+          sleep 20000
