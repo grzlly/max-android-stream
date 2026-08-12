@@ -14,6 +14,8 @@ jobs:
       NODE_ID: 3
       TUNNEL_PORT: 8103
       PACKAGE_NAME: ""
+      ANDROID_AVD_HOME: /home/runner/.android/avd
+      ANDROID_USER_HOME: /home/runner/.android
 
     steps:
       - name: Checkout
@@ -292,4 +294,5 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
 
