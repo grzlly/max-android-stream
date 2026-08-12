@@ -287,8 +287,8 @@ jobs:
           fi
           
           echo "Disabling Gboard..."
-          $ADB -s emulator-5554 shell pm disable-user --user 0 com.google.android.inputmethod.latin
-          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.inputmethod.latin
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.google.android.inputmethod.latin || true
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.inputmethod.latin || true
 
           echo "Installing Max APK..."
           $ADB -s emulator-5554 install -r max.apk
