@@ -259,17 +259,49 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
 
-          echo "Configuring Gboard for Russian..."
-          # Set system locale STRICTLY to Russian only
+          echo "Configuring Gboard for Russian using UI Automator..."
           $ADB -s emulator-5554 shell settings put system system_locales ru-RU
-          
-          # Clear Gboard's data so it re-initializes on the next launch
-          # It will see the system is strictly Russian and default to it!
           $ADB -s emulator-5554 shell pm clear com.google.android.inputmethod.latin
           
           IME_ID="com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"
           $ADB -s emulator-5554 shell ime enable "$IME_ID"
           $ADB -s emulator-5554 shell ime set "$IME_ID"
+          
+          # Start Gboard settings
+          $ADB -s emulator-5554 shell am start -n com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.preference.SettingsActivity
+          sleep 4
+          
+          cat << 'EOF' > click_text.sh
+          text="$1"
+          # Dump UI hierarchy
+          $ADB -s emulator-5554 shell uiautomator dump /sdcard/window_dump.xml >/dev/null 2>&1 || sleep 2 && $ADB -s emulator-5554 shell uiautomator dump /sdcard/window_dump.xml >/dev/null
+          
+          # Find bounds of the element containing the text
+          bounds=$($ADB -s emulator-5554 shell cat /sdcard/window_dump.xml | grep -i "text=\"[^\"]*$text[^\"]*\"" | grep -o "bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" | head -1 | cut -d'"' -f2)
+          if [ -n "$bounds" ]; then
+            x1=$(echo $bounds | cut -d'[' -f2 | cut -d',' -f1)
+            y1=$(echo $bounds | cut -d',' -f2 | cut -d']' -f1)
+            x2=$(echo $bounds | cut -d'[' -f3 | cut -d',' -f1)
+            y2=$(echo $bounds | cut -d',' -f3 | cut -d']' -f1)
+            cx=$(( (x1 + x2) / 2 ))
+            cy=$(( (y1 + y2) / 2 ))
+            echo "Clicking '$text' at $cx $cy"
+            $ADB -s emulator-5554 shell input tap $cx $cy
+            sleep 2
+            exit 0
+          fi
+          echo "Text '$text' not found"
+          exit 1
+EOF
+          chmod +x click_text.sh
+          
+          export ADB="$ADB"
+          ./click_text.sh "Языки" || ./click_text.sh "Languages"
+          ./click_text.sh "Добавить клавиатуру" || ./click_text.sh "Add keyboard"
+          ./click_text.sh "Русский" || ./click_text.sh "Russian"
+          ./click_text.sh "Готово" || ./click_text.sh "Done"
+          
+          $ADB -s emulator-5554 shell am force-stop com.google.android.inputmethod.latin
           
           $ADB -s emulator-5554 install -r max.apk
 
