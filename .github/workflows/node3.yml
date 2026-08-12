@@ -260,7 +260,7 @@ jobs:
           PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
 
           echo "Installing Simple Keyboard..."
-          wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/latest/download/app-release.apk
+          wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/download/146/app-release.apk
           echo "Setting system language to Russian via Appium Settings..."
           wget -qO appium.apk https://github.com/appium/io.appium.settings/releases/download/v8.0.8/settings_apk-debug.apk
           $ADB -s emulator-5554 install -r appium.apk
