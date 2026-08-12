@@ -261,8 +261,12 @@ jobs:
 
           echo "Installing Simple Keyboard..."
           wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/latest/download/app-release.apk
-          $ADB -s emulator-5554 shell settings put system system_locales ru-RU,en-US
-          $ADB -s emulator-5554 shell am broadcast -a android.intent.action.LOCALE_CHANGED
+          echo "Setting system language to Russian via Appium Settings..."
+          wget -qO appium.apk https://github.com/appium/io.appium.settings/releases/download/v8.0.8/settings_apk-debug.apk
+          $ADB -s emulator-5554 install -r appium.apk
+          $ADB -s emulator-5554 shell pm grant io.appium.settings android.permission.CHANGE_CONFIGURATION
+          $ADB -s emulator-5554 shell am broadcast -a io.appium.settings.locale -n io.appium.settings/.receivers.LocaleSettingReceiver --es lang ru --es country RU
+          sleep 3
           $ADB -s emulator-5554 install -r simple.apk
           echo "Waiting 5s for IME registration..."
           sleep 5
