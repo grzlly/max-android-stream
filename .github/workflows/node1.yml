@@ -238,7 +238,7 @@ jobs:
           if xdpyinfo -display :0 -queryExtensions | grep -q DAMAGE; then
             x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noncache -shared -defer 0
           else
-            x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -noncache -shared -defer 0
+            x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -wait 10 -noncache -shared -defer 0
           fi
           
           # 7. Start websockify
@@ -304,6 +304,7 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
 
 
 
