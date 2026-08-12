@@ -262,9 +262,12 @@ jobs:
           echo "Installing Max APK and Yandex Keyboard..."
           $ADB -s emulator-5554 shell settings put system system_locales ru-RU,en-US
           $ADB -s emulator-5554 install -r yandex.apk
-          IME_ID=$($ADB -s emulator-5554 shell ime list -a -s | grep yandex | tr -d '\r')
-          $ADB -s emulator-5554 shell ime enable "$IME_ID"
-          $ADB -s emulator-5554 shell ime set "$IME_ID"
+          sleep 3
+          IME_ID=$($ADB -s emulator-5554 shell ime list -a -s | grep -i 'yandex' | head -n 1 | tr -d '\r')
+          if [ -n "$IME_ID" ]; then
+            $ADB -s emulator-5554 shell ime enable "$IME_ID"
+            $ADB -s emulator-5554 shell ime set "$IME_ID"
+          fi
           $ADB -s emulator-5554 shell pm uninstall -k --user 0 com.google.android.inputmethod.latin >/dev/null 2>&1 || true
           $ADB -s emulator-5554 install -r max.apk
 
@@ -288,7 +291,8 @@ jobs:
                 if [ "$FOCUS" != "$PACKAGE_NAME" ] && \
                    [ "$FOCUS" != "com.android.permissioncontroller" ] && \
                    [ "$FOCUS" != "com.android.systemui" ] && \
-                   [ "$FOCUS" != "ru.yandex.yandexkeyboard" ]; then
+                   [ "$FOCUS" != "ru.yandex.yandexkeyboard" ] && \
+                   [ "$FOCUS" != "ru.yandex.androidkeyboard" ]; then
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
