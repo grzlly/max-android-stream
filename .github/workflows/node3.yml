@@ -1,28 +1,23 @@
-name: Max Node 3
+name: Node 3 Stream (VNC)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 3 * * *'
+  push:
+    paths:
+      - '.github/workflows/node3.yml'
 
 jobs:
-  stream:
+  run-stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 360
     env:
-      ANDROID_AVD_HOME: /home/runner/.android/avd
-      ANDROID_USER_HOME: /home/runner/.android
-      NODE_ID: "3"
-      TUNNEL_PORT: "8103"
+      NODE_ID: 3
+      TUNNEL_PORT: 8103
+      PACKAGE_NAME: ""
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup SSH key
         env:
@@ -41,7 +36,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y libpulse0 libgl1 aapt nodejs npm adb
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils x11-xserver-utils scrcpy nodejs npm
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -52,235 +47,161 @@ jobs:
           mkdir -p $ANDROID_AVD_HOME
           sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
+
           echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
           echo "hw.keyboard=yes"    >> $ANDROID_AVD_HOME/max_device.avd/config.ini
 
-      - name: Setup ws-scrcpy node server
+      - name: Setup Web UI and Orchestrator
         run: |
-          mkdir -p /opt/node-server
-          cd /opt/node-server
-          npm init -y
-          npm install express ws
-
-          # РћРїСЂРµРґРµР»СЏРµРј package name APK
-          PACKAGE_NAME=$(aapt dump badging /home/runner/work/max-android-stream/max-android-stream/max.apk 2>/dev/null | grep "^package" | grep -oP "name='\K[^']+" | head -1 || echo "com.vk.im")
-          echo "Package: $PACKAGE_NAME"
+          PACKAGE_NAME=$(aapt dump badging ./max.apk 2>/dev/null | grep "^package" | grep -oP "name='\K[^']+" | head -1 || echo "com.vk.im")
           echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
 
-          cat << EOF | sudo tee /opt/node-server/server.js
-          const express = require('express');
-          const { execSync, spawn } = require('child_process');
-          const http = require('http');
-          const WebSocket = require('ws');
-          const fs = require('fs');
-          const path = require('path');
+          mkdir -p /opt/orchestrator
+          cd /opt/orchestrator
+          npm init -y
+          npm install express http-proxy-middleware
 
+          cat << HTMLEOF | sudo tee /opt/orchestrator/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+              <title>Max Node ${NODE_ID}</title>
+              <style>
+                  body { margin: 0; padding: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; }
+                  iframe { width: 720px; height: 1280px; min-width: 720px; min-height: 1280px; flex-shrink: 0; border: none; display: none; transform-origin: top center; }
+                  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%; padding: 20px; box-sizing: border-box; }
+                  .spinner { border: 4px solid #333; border-top: 4px solid #00ffcc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+                  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+              </style>
+          </head>
+          <body>
+              <div id="loading">
+                  <div class="spinner"></div>
+                  <h2 id="status-text">Запуск эмулятора (Node ${NODE_ID})...</h2>
+                  <p>Это может занять 1-2 минуты</p>
+              </div>
+              
+              <iframe id="vnc-frame" src=""></iframe>
+
+              <script>
+                  const loading = document.getElementById('loading');
+                  const statusText = document.getElementById('status-text');
+                  const iframe = document.getElementById('vnc-frame');
+                  
+                  function resize() {
+                      const pr = 720 / 1280;
+                      const wr = window.innerWidth / window.innerHeight;
+                      const scale = wr < pr ? window.innerWidth / 720 : window.innerHeight / 1280;
+                      iframe.style.transform = 'scale(' + scale + ')';
+                      document.body.style.height = (1280 * scale) + 'px';
+                  }
+                  window.addEventListener('resize', resize);
+                  resize();
+
+                  function checkStatus() {
+                      fetch('/node${NODE_ID}/api/status')
+                          .then(r => r.json())
+                          .then(data => {
+                              if (data.ready) {
+                                  loading.style.display = 'none';
+                                  iframe.style.display = 'block';
+                                  const host = window.location.hostname;
+                                  const port = window.location.port;
+                                  const path = 'node${NODE_ID}/websockify';
+                                  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                                  iframe.src = '/node${NODE_ID}/vnc.html?autoconnect=true&resize=scale&host=' + host + '&port=' + port + '&path=' + path;
+                              } else {
+                                  statusText.textContent = 'Приложение запускается...';
+                                  setTimeout(checkStatus, 3000);
+                              }
+                          })
+                          .catch(() => {
+                              statusText.textContent = 'Подключение к серверу...';
+                              setTimeout(checkStatus, 3000);
+                          });
+                  }
+                  checkStatus();
+              </script>
+          </body>
+          </html>
+          HTMLEOF
+
+          cat << JSEOF | sudo tee /opt/orchestrator/server.js
+          const express = require('express');
+          const { createProxyMiddleware } = require('http-proxy-middleware');
+          const { execSync } = require('child_process');
+          
           const app = express();
-          const server = http.createServer(app);
           const ADB = process.env.ANDROID_HOME + '/platform-tools/adb';
           const PACKAGE = '$PACKAGE_NAME';
           let isReady = false;
 
-          // API: reset app (called by balancer on VPS)
+          setTimeout(() => { isReady = true; }, 30000);
+
           app.post('/api/reset', (req, res) => {
             console.log('[Node] Reset requested...');
             isReady = false;
             try {
               execSync(ADB + ' -s emulator-5554 shell pm clear ' + PACKAGE, { timeout: 15000 });
               execSync(ADB + ' -s emulator-5554 shell monkey -p ' + PACKAGE + ' -c android.intent.category.LAUNCHER 1', { timeout: 10000 });
-              setTimeout(() => { isReady = true; console.log('[Node] Ready!'); }, 3000);
+              setTimeout(() => { isReady = true; }, 3000);
               res.json({ ok: true });
             } catch(e) {
-              console.error('[Node] Reset error:', e.message);
-              isReady = true; // РћС‚РєСЂС‹РІР°РµРј РІСЃС‘ СЂР°РІРЅРѕ
+              isReady = true;
               res.json({ ok: true, warn: e.message });
             }
           });
 
-          // API: СЃС‚Р°С‚СѓСЃ
-          app.get('/api/status', (req, res) => res.json({ ready: isReady }));
-
-          // РЎС‚СЂРёРј С‡РµСЂРµР· scrcpy в†’ WebSocket
-          const wss = new WebSocket.Server({ noServer: true });
-          wss.on('connection', (ws) => {
-            if (!isReady) { ws.close(1013, 'Not ready'); return; }
-            console.log('[Node] Client connected to stream');
-
-                          let proc = null;
-              function startStream() {
-                if (ws.readyState !== WebSocket.OPEN) return;
-                proc = spawn(ADB, [
-                  '-s', 'emulator-5554', 'shell',
-                  'screenrecord', '--output-format=h264', '--size=720x1280', '--bit-rate=3000000', '--time-limit=180', '-'
-                ]);
-                proc.stdout.on('data', (chunk) => {
-                  if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
-                });
-                proc.on('exit', () => {
-                  if (ws.readyState === WebSocket.OPEN) setTimeout(startStream, 500);
-                });
-                proc.on('error', () => {
-                  if (ws.readyState === WebSocket.OPEN) setTimeout(startStream, 500);
-                });
-              }
-              startStream();
-
-              ws.on('close', () => { if (proc) proc.kill(); });
-              ws.on('error', () => { if (proc) proc.kill(); });
+          app.get('/api/status', (req, res) => {
+              res.json({ ready: isReady });
           });
 
-          // Touch/Key events РѕС‚ РєР»РёРµРЅС‚Р° С‡РµСЂРµР· РѕС‚РґРµР»СЊРЅС‹Р№ WS
-          const wssInput = new WebSocket.Server({ noServer: true });
-          wssInput.on('connection', (ws) => {
-            ws.on('message', (msg) => {
-              try {
-                const ev = JSON.parse(msg);
-                if (ev.type === 'touch') {
-                  // РљРѕРѕСЂРґРёРЅР°С‚С‹ РјР°СЃС€С‚Р°Р±РёСЂСѓРµРј РѕР±СЂР°С‚РЅРѕ Рє 720x1280
-                  const x = Math.round(ev.x * 720);
-                  const y = Math.round(ev.y * 1280);
-                  if (ev.action === 'down') {
-                    execSync(ADB + ' -s emulator-5554 shell input touchscreen swipe ' + x + ' ' + y + ' ' + x + ' ' + y + ' 50');
-                  }
-                } else if (ev.type === 'key') {
-                  execSync(ADB + ' -s emulator-5554 shell input keyevent ' + ev.code);
-                } else if (ev.type === 'text') {
-                  execSync(ADB + ' -s emulator-5554 shell input text "' + ev.text.replace(/"/g, '') + '"');
-                }
-              } catch(e) {}
-            });
+          app.use('/websockify', createProxyMiddleware({
+              target: 'http://127.0.0.1:8001',
+              changeOrigin: true,
+              ws: true
+          }));
+
+          app.get('/', (req, res) => {
+              res.sendFile(__dirname + '/index.html');
           });
 
-          // РЎС‚Р°С‚РёРєР° (HTML-РїР»РµРµСЂ)
-          app.use(express.static('/opt/node-server/public'));
+          app.use(express.static('/usr/share/novnc'));
 
-                      server.on('upgrade', (request, socket, head) => {
-              if (request.url === '/stream') {
-                wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws, request));
-              } else if (request.url === '/input') {
-                wssInput.handleUpgrade(request, socket, head, ws => wssInput.emit('connection', ws, request));
-              } else {
-                socket.destroy();
-              }
-            });
-            server.listen(8000, '0.0.0.0', () => console.log('[Node] Server on :8000'));
-          EOF
+          app.listen(8000, '0.0.0.0', () => console.log('Orchestrator running on port 8000'));
+          JSEOF
 
-          # HTML РїР»РµРµСЂ СЃ WebCodecs (H.264) вЂ” РєСЂР°СЃРёРІС‹Р№, РјРѕР±РёР»СЊРЅС‹Р№
-          mkdir -p /opt/node-server/public
-          cat << 'HTMLEOF' | sudo tee /opt/node-server/public/index.html
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <title>Max</title>
-            <style>
-              * { box-sizing: border-box; margin: 0; padding: 0; }
-              body { background: #000; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; overflow: hidden; }
-              #canvas { width: 720px; height: 1280px; min-width: 720px; min-height: 1280px; flex-shrink: 0; display: block; transform-origin: top center; touch-action: none; }
-              #status { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #00ffcc; padding: 8px 18px; border-radius: 20px; font-family: sans-serif; font-size: 13px; display: none; z-index: 99; }
-            </style>
-          </head>
-          <body>
-            <div id="status">РџРѕРґРєР»СЋС‡РµРЅРёРµ...</div>
-            <canvas id="canvas" width="720" height="1280"></canvas>
-            <script>
-              const canvas = document.getElementById('canvas');
-              const ctx = canvas.getContext('2d');
-              const status = document.getElementById('status');
-
-              // РњР°СЃС€С‚Р°Р±РёСЂРѕРІР°РЅРёРµ РїРѕРґ СЌРєСЂР°РЅ
-              function resize() {
-                const pr = 720 / 1280;
-                const wr = window.innerWidth / window.innerHeight;
-                const scale = wr < pr ? window.innerWidth / 720 : window.innerHeight / 1280;
-                canvas.style.transform = 'scale(' + scale + ')';
-                document.body.style.height = (1280 * scale) + 'px';
-              }
-              window.addEventListener('resize', resize);
-              resize();
-
-              // WebSocket СЃС‚СЂРёРј
-              const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/stream';
-              const wsIn = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/input';
-
-              status.style.display = 'block';
-
-              let decoder = null;
-              let inputWs = null;
-
-              function connect() {
-                const ws = new WebSocket(wsUrl);
-                ws.binaryType = 'arraybuffer';
-
-                ws.onopen = () => {
-                  status.style.display = 'none';
-                  // РџРѕРґРґРµСЂР¶РєР° WebCodecs (Chrome 94+)
-                  if ('VideoDecoder' in window) {
-                    decoder = new VideoDecoder({
-                      output: (frame) => {
-                        ctx.drawImage(frame, 0, 0);
-                        frame.close();
-                      },
-                      error: (e) => console.error('Decoder:', e)
-                    });
-                    decoder.configure({ codec: 'avc1.42001e', optimizeForLatency: true });
-                  }
-                  // Input WS
-                  inputWs = new WebSocket(wsIn);
-                };
-
-                ws.onmessage = (e) => {
-                  if (decoder && decoder.state === 'configured') {
-                    try {
-                      const chunk = new EncodedVideoChunk({
-                        type: 'key',
-                        data: e.data,
-                        timestamp: performance.now() * 1000
-                      });
-                      decoder.decode(chunk);
-                    } catch(err) {}
-                  }
-                };
-
-                ws.onclose = () => {
-                  status.style.display = 'block';
-                  status.textContent = 'РџРµСЂРµРїРѕРґРєР»СЋС‡РµРЅРёРµ...';
-                  setTimeout(connect, 1500);
-                };
-              }
-              connect();
-
-              // Touch в†’ input events
-              function sendTouch(x, y, action) {
-                const rect = canvas.getBoundingClientRect();
-                const scale = parseFloat(canvas.style.transform.replace('scale(','').replace(')','')) || 1;
-                const rx = (x - rect.left) / (rect.width);
-                const ry = (y - rect.top) / (rect.height);
-                if (inputWs && inputWs.readyState === 1) {
-                  inputWs.send(JSON.stringify({ type: 'touch', action, x: rx, y: ry }));
-                }
-              }
-
-              canvas.addEventListener('mousedown', e => sendTouch(e.clientX, e.clientY, 'down'));
-              canvas.addEventListener('touchstart', e => {
-                e.preventDefault();
-                sendTouch(e.touches[0].clientX, e.touches[0].clientY, 'down');
-              }, { passive: false });
-            </script>
-          </body>
-          </html>
-          HTMLEOF
-
-      - name: Start emulator and node server
+      - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
-          $ADB start-server
 
+          # 1. Xvfb with HUGE screen
+          Xvfb :0 -screen 0 2000x2000x24 &
+          export DISPLAY=:0
+          for i in $(seq 1 30); do
+            xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
+            sleep 1
+          done
+
+          # 2. Fluxbox: force window to 0,0
+          mkdir -p ~/.fluxbox
+          printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
+          printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
+          fluxbox -display :0 2>/dev/null &
+          sleep 2
+          
+          xsetroot -solid black -display :0 &
+
+          # 3. Start ADB
+          $ADB start-server
+          echo "ADB daemon started"
+
+          # 4. Start emulator
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
@@ -292,7 +213,6 @@ jobs:
             STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
             [ "$STATE" = "device" ] && echo "ADB online!" && break
             [ "$STATE" = "offline" ] && $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
-            echo "ADB: $STATE ($i/36)"
             sleep 5
           done
 
@@ -300,26 +220,46 @@ jobs:
           for i in $(seq 1 60); do
             BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
-            echo "Boot: '$BOOT' ($i/60)"
             sleep 5
           done
-          sleep 3
+          sleep 5
 
-          echo "Installing APK..."
+          # 5. Launch scrcpy
+          DISPLAY=:0 scrcpy \
+            -s emulator-5554 \
+            --max-fps 30 \
+            2>/dev/null &
+          sleep 4
+
+          # 6. Start VNC
+          x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -noncache -shared -defer 0
+          
+          # 7. Start websockify
+          websockify 8001 localhost:5900 &
+
+          # 8. Start Orchestrator
+          export ANDROID_HOME=$ANDROID_HOME
+          cd /opt/orchestrator
+          node server.js &
+
+      - name: Install Max and apply Kiosk Mode
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
+
+          echo "Installing Max APK..."
           $ADB -s emulator-5554 install -r max.apk
 
-          # РћС‚РєР»СЋС‡Р°РµРј Р°РЅРёРјР°С†РёРё Рё Chrome
           $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
           $ADB -s emulator-5554 shell settings put global window_animation_scale 0
           $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
           $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
           $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.chrome >/dev/null 2>&1 || true
 
-          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
           echo "Launching $PACKAGE_NAME..."
           $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
 
-          # Watchdog
+          echo "Starting watchdog..."
           (
             while true; do
               FOCUS=$($ADB -s emulator-5554 shell dumpsys window windows 2>/dev/null | grep -E 'mCurrentFocus' | awk -F'/' '{print $1}' | awk '{print $NF}' | tr -d '\r')
@@ -336,12 +276,6 @@ jobs:
             done
           ) &
 
-          # Р—Р°РїСѓСЃРє Node.js СЃРµСЂРІРµСЂР°
-          export ANDROID_HOME=$ANDROID_HOME
-          cd /opt/node-server
-          node server.js &
-          echo "Node server started on :8000"
-
       - name: Open SSH Reverse Tunnel to VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -357,8 +291,5 @@ jobs:
 
       - name: Keep alive (up to 5h 50min)
         run: |
-          echo "Node ${{ env.NODE_ID }} live -> max.grzly.ru"
           sleep 20000
-
-
 
