@@ -232,9 +232,10 @@ jobs:
 
           # 5. Launch scrcpy
           DISPLAY=:0 scrcpy \
-            -s emulator-5554 \
-            --max-fps 30 \
-            2>/dev/null &
+              -s emulator-5554 \
+              --max-fps 30 \
+              --crop 720:1232:0:48 \
+              2>/dev/null &
           sleep 4
 
           # 6. Start VNC
@@ -266,20 +267,7 @@ jobs:
           echo "Launching $PACKAGE_NAME..."
           $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
-            echo "Disabling SystemUI and enabling Kiosk Mode..."
-            # Disable SystemUI to completely remove the status bar
-            $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.systemui >/dev/null 2>&1 || true
-            
-            # Enable Kiosk Mode (Lock Task)
-            $ADB -s emulator-5554 shell settings put system lock_to_app_enabled 1
-            sleep 2
-            
-            # Find the active Task ID and lock it
-            TASK_ID=$($ADB -s emulator-5554 shell dumpsys activity tasks | grep -o '* Task{[^}]*}' | head -n 1 | grep -o '#[0-9]*' | tr -d '#')
-            if [ -n "$TASK_ID" ]; then
-              echo "Locking Task ID: $TASK_ID"
-              $ADB -s emulator-5554 shell am task lock $TASK_ID >/dev/null 2>&1 || true
-            fi
+
 
           echo "Starting watchdog..."
           (
@@ -293,20 +281,7 @@ jobs:
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
-            echo "Disabling SystemUI and enabling Kiosk Mode..."
-            # Disable SystemUI to completely remove the status bar
-            $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.systemui >/dev/null 2>&1 || true
-            
-            # Enable Kiosk Mode (Lock Task)
-            $ADB -s emulator-5554 shell settings put system lock_to_app_enabled 1
-            sleep 2
-            
-            # Find the active Task ID and lock it
-            TASK_ID=$($ADB -s emulator-5554 shell dumpsys activity tasks | grep -o '* Task{[^}]*}' | head -n 1 | grep -o '#[0-9]*' | tr -d '#')
-            if [ -n "$TASK_ID" ]; then
-              echo "Locking Task ID: $TASK_ID"
-              $ADB -s emulator-5554 shell am task lock $TASK_ID >/dev/null 2>&1 || true
-            fi >/dev/null 2>&1
+
                 fi
               fi
               sleep 2
@@ -329,6 +304,7 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
 
 
 
