@@ -263,7 +263,13 @@ jobs:
           wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/latest/download/app-release.apk
           $ADB -s emulator-5554 shell settings put system system_locales ru-RU,en-US
           $ADB -s emulator-5554 install -r simple.apk
-          IME_ID="rkkr.simplekeyboard.inputmethod/.latin.LatinIME"
+          echo "Waiting 5s for IME registration..."
+          sleep 5
+          IME_ID=$($ADB -s emulator-5554 shell ime list -a | grep -o "[^ :]*simplekeyboard[^ :]*" | head -1 | tr -d '\r' | tr -d '\n')
+          if [ -z "$IME_ID" ]; then
+            IME_ID="rkkr.simplekeyboard.inputmethod/.latin.LatinIME"
+          fi
+          echo "Using IME_ID: $IME_ID"
           $ADB -s emulator-5554 shell ime enable "$IME_ID"
           $ADB -s emulator-5554 shell ime set "$IME_ID"
           
