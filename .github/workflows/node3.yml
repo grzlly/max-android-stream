@@ -169,11 +169,8 @@ jobs:
               res.json({ ready: isReady });
           });
 
-          app.use('/websockify', createProxyMiddleware({
-              target: 'http://127.0.0.1:8001',
-              changeOrigin: true,
-              ws: true
-          }));
+          const wsProxy = createProxyMiddleware({ target: 'http://127.0.0.1:8001', ws: true, changeOrigin: true });
+            app.use('/websockify', wsProxy);
 
           app.get('/', (req, res) => {
               res.sendFile(__dirname + '/index.html');
@@ -181,7 +178,8 @@ jobs:
 
           app.use(express.static('/usr/share/novnc'));
 
-          app.listen(8000, '0.0.0.0', () => console.log('Orchestrator running on port 8000'));
+          const server = app.listen(8000, '0.0.0.0', () => console.log('Orchestrator running on port 8000'));
+            server.on('upgrade', wsProxy.upgrade);
           JSEOF
 
       - name: Start display, emulator and VNC
@@ -300,6 +298,7 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
 
 
 
