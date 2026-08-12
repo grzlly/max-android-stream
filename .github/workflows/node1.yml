@@ -271,28 +271,23 @@ jobs:
           $ADB -s emulator-5554 shell am start -n com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.preference.SettingsActivity
           sleep 4
           
-          cat << 'EOF' > click_text.sh
-          text="$1"
-          # Dump UI hierarchy
-          $ADB -s emulator-5554 shell uiautomator dump /sdcard/window_dump.xml >/dev/null 2>&1 || sleep 2 && $ADB -s emulator-5554 shell uiautomator dump /sdcard/window_dump.xml >/dev/null
-          
-          # Find bounds of the element containing the text
-          bounds=$($ADB -s emulator-5554 shell cat /sdcard/window_dump.xml | grep -i "text=\"[^\"]*$text[^\"]*\"" | grep -o "bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" | head -1 | cut -d'"' -f2)
-          if [ -n "$bounds" ]; then
-            x1=$(echo $bounds | cut -d'[' -f2 | cut -d',' -f1)
-            y1=$(echo $bounds | cut -d',' -f2 | cut -d']' -f1)
-            x2=$(echo $bounds | cut -d'[' -f3 | cut -d',' -f1)
-            y2=$(echo $bounds | cut -d',' -f3 | cut -d']' -f1)
-            cx=$(( (x1 + x2) / 2 ))
-            cy=$(( (y1 + y2) / 2 ))
-            echo "Clicking '$text' at $cx $cy"
-            $ADB -s emulator-5554 shell input tap $cx $cy
-            sleep 2
-            exit 0
-          fi
-          echo "Text '$text' not found"
-          exit 1
-EOF
+          echo 'text="$1"' > click_text.sh
+          echo '$ADB -s emulator-5554 shell uiautomator dump /sdcard/window_dump.xml >/dev/null 2>&1 || sleep 2 && $ADB -s emulator-5554 shell uiautomator dump /sdcard/window_dump.xml >/dev/null' >> click_text.sh
+          echo 'bounds=$($ADB -s emulator-5554 shell cat /sdcard/window_dump.xml | grep -i "text=\"[^\"]*$text[^\"]*\"" | grep -o "bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" | head -1 | cut -d'"'\"'"' -f2)' >> click_text.sh
+          echo 'if [ -n "$bounds" ]; then' >> click_text.sh
+          echo '  x1=$(echo $bounds | cut -d"[" -f2 | cut -d"," -f1)' >> click_text.sh
+          echo '  y1=$(echo $bounds | cut -d"," -f2 | cut -d"]" -f1)' >> click_text.sh
+          echo '  x2=$(echo $bounds | cut -d"[" -f3 | cut -d"," -f1)' >> click_text.sh
+          echo '  y2=$(echo $bounds | cut -d"," -f3 | cut -d"]" -f1)' >> click_text.sh
+          echo '  cx=$(( (x1 + x2) / 2 ))' >> click_text.sh
+          echo '  cy=$(( (y1 + y2) / 2 ))' >> click_text.sh
+          echo '  echo "Clicking $text at $cx $cy"' >> click_text.sh
+          echo '  $ADB -s emulator-5554 shell input tap $cx $cy' >> click_text.sh
+          echo '  sleep 2' >> click_text.sh
+          echo '  exit 0' >> click_text.sh
+          echo 'fi' >> click_text.sh
+          echo 'echo "Text $text not found"' >> click_text.sh
+          echo 'exit 1' >> click_text.sh
           chmod +x click_text.sh
           
           export ADB="$ADB"
