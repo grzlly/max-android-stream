@@ -104,27 +104,36 @@ jobs:
           app.get('/api/status', (req, res) => res.json({ ready: isReady }));
 
           // РЎС‚СЂРёРј С‡РµСЂРµР· scrcpy в†’ WebSocket
-          const wss = new WebSocket.Server({ server, path: '/stream' });
+          const wss = new WebSocket.Server({ noServer: true });
           wss.on('connection', (ws) => {
             if (!isReady) { ws.close(1013, 'Not ready'); return; }
             console.log('[Node] Client connected to stream');
 
-            const proc = spawn(ADB, [
-              '-s', 'emulator-5554', 'shell',
-              'screenrecord', '--output-format=h264', '--size=720x1280', '--bit-rate=3000000', '-'
-            ]);
+                          let proc = null;
+              function startStream() {
+                if (ws.readyState !== WebSocket.OPEN) return;
+                proc = spawn(ADB, [
+                  '-s', 'emulator-5554', 'shell',
+                  'screenrecord', '--output-format=h264', '--size=720x1280', '--bit-rate=3000000', '--time-limit=180', '-'
+                ]);
+                proc.stdout.on('data', (chunk) => {
+                  if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
+                });
+                proc.on('exit', () => {
+                  if (ws.readyState === WebSocket.OPEN) setTimeout(startStream, 500);
+                });
+                proc.on('error', () => {
+                  if (ws.readyState === WebSocket.OPEN) setTimeout(startStream, 500);
+                });
+              }
+              startStream();
 
-            proc.stdout.on('data', (chunk) => {
-              if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
-            });
-
-            ws.on('close', () => proc.kill());
-            ws.on('error', () => proc.kill());
-            proc.on('exit', () => { if (ws.readyState === WebSocket.OPEN) ws.close(); });
+              ws.on('close', () => { if (proc) proc.kill(); });
+              ws.on('error', () => { if (proc) proc.kill(); });
           });
 
           // Touch/Key events РѕС‚ РєР»РёРµРЅС‚Р° С‡РµСЂРµР· РѕС‚РґРµР»СЊРЅС‹Р№ WS
-          const wssInput = new WebSocket.Server({ server, path: '/input' });
+          const wssInput = new WebSocket.Server({ noServer: true });
           wssInput.on('connection', (ws) => {
             ws.on('message', (msg) => {
               try {
@@ -148,7 +157,16 @@ jobs:
           // РЎС‚Р°С‚РёРєР° (HTML-РїР»РµРµСЂ)
           app.use(express.static('/opt/node-server/public'));
 
-          server.listen(8000, '0.0.0.0', () => console.log('[Node] Server on :8000'));
+                      server.on('upgrade', (request, socket, head) => {
+              if (request.url === '/stream') {
+                wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws, request));
+              } else if (request.url === '/input') {
+                wssInput.handleUpgrade(request, socket, head, ws => wssInput.emit('connection', ws, request));
+              } else {
+                socket.destroy();
+              }
+            });
+            server.listen(8000, '0.0.0.0', () => console.log('[Node] Server on :8000'));
           EOF
 
           # HTML РїР»РµРµСЂ СЃ WebCodecs (H.264) вЂ” РєСЂР°СЃРёРІС‹Р№, РјРѕР±РёР»СЊРЅС‹Р№
@@ -341,4 +359,6 @@ jobs:
         run: |
           echo "Node ${{ env.NODE_ID }} live -> max.grzly.ru"
           sleep 20000
+
+
 
