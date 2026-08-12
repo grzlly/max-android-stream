@@ -13,7 +13,7 @@ jobs:
       ANDROID_AVD_HOME: /home/runner/.android/avd
       ANDROID_USER_HOME: /home/runner/.android
       NODE_ID: "1"
-      TUNNEL_PORT: "8001"
+      TUNNEL_PORT: "8101"
 
     steps:
       - uses: actions/checkout@v4

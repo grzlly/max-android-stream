@@ -1,4 +1,4 @@
-﻿name: Max Node 3
+name: Max Node 3
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
       ANDROID_AVD_HOME: /home/runner/.android/avd
       ANDROID_USER_HOME: /home/runner/.android
       NODE_ID: "3"
-      TUNNEL_PORT: "8003"
+      TUNNEL_PORT: "8103"
 
     steps:
       - uses: actions/checkout@v4
