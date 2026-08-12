@@ -274,12 +274,21 @@ jobs:
           $ADB -s emulator-5554 shell ime set "$IME_ID"
           
           SUBTYPE_HASH=$($ADB -s emulator-5554 shell dumpsys input_method | awk -v ime="$IME_ID" '
-            $0 ~ ime { in_ime=1 }
-            in_ime && /InputMethodSubtype/ { in_subtype=1; current_hash="" }
-            in_subtype && /mSubtypeHashCode=/ { split($0, a, "="); current_hash=a[2] }
-            in_subtype && /(mSubtypeLocale|languageTag).*ru/ { print current_hash; exit }
-            in_ime && /mId=/ && $0 !~ ime { in_ime=0 }
-          ' | tr -d '\r' | tr -d ' ')
+              $0 ~ ime { in_ime=1 }
+              in_ime && /InputMethodSubtype/ { 
+                if (is_ru && current_hash) { print current_hash; exit }
+                in_subtype=1; current_hash=""; is_ru=0 
+              }
+              in_subtype && /mSubtypeHashCode=/ { split($0, a, "="); current_hash=a[2] }
+              in_subtype && /(mSubtypeLocale|languageTag).*ru/ { is_ru=1 }
+              in_ime && /mId=/ && $0 !~ ime { 
+                if (is_ru && current_hash) { print current_hash; exit }
+                in_ime=0 
+              }
+              END {
+                if (is_ru && current_hash) { print current_hash }
+              }
+            ' | tr -d '\r' | tr -d ' ')
           
           if [ -n "$SUBTYPE_HASH" ]; then
             $ADB -s emulator-5554 shell settings put secure enabled_input_methods "${IME_ID};${SUBTYPE_HASH}"
