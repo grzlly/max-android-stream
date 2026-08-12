@@ -261,7 +261,7 @@ jobs:
 
           echo "Installing Max APK..."
           $ADB -s emulator-5554 shell settings put system system_locales ru-RU,en-US
-          $ADB -s emulator-5554 shell am force-stop com.google.android.inputmethod.latin
+          $ADB -s emulator-5554 shell pm clear com.google.android.inputmethod.latin
           $ADB -s emulator-5554 install -r max.apk
 
           $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
