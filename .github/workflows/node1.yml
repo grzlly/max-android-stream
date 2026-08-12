@@ -259,26 +259,17 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
 
-          echo "Configuring Gboard and forcing Russian layout..."
-          $ADB -s emulator-5554 shell settings put system system_locales ru-RU,en-US
+          echo "Configuring Gboard for Russian..."
+          # Set system locale STRICTLY to Russian only
+          $ADB -s emulator-5554 shell settings put system system_locales ru-RU
+          
+          # Clear Gboard's data so it re-initializes on the next launch
+          # It will see the system is strictly Russian and default to it!
+          $ADB -s emulator-5554 shell pm clear com.google.android.inputmethod.latin
           
           IME_ID="com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"
           $ADB -s emulator-5554 shell ime enable "$IME_ID"
           $ADB -s emulator-5554 shell ime set "$IME_ID"
-          
-          # Gboard on this image has Russian built-in, so we force its Subtype ID
-          SUBTYPE_HASH=$($ADB -s emulator-5554 shell dumpsys input_method | awk -v ime="$IME_ID" '
-            $0 ~ ime { in_ime=1 }
-            in_ime && /InputMethodSubtype/ { in_subtype=1; current_hash="" }
-            in_subtype && /mSubtypeId=/ { split($0, a, "="); current_hash=a[2] }
-            in_subtype && /mSubtypeLocale=ru/ { print current_hash; exit }
-            in_ime && /mId=/ && $0 !~ ime { in_ime=0 }
-          ' | tr -d '\r' | tr -d ' ')
-          
-          if [ -n "$SUBTYPE_HASH" ]; then
-            $ADB -s emulator-5554 shell settings put secure enabled_input_methods "${IME_ID};${SUBTYPE_HASH}"
-            $ADB -s emulator-5554 shell settings put secure selected_input_method_subtype "$SUBTYPE_HASH"
-          fi
           
           $ADB -s emulator-5554 install -r max.apk
 
