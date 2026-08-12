@@ -272,7 +272,7 @@ jobs:
           sleep 5
           IME_ID=$($ADB -s emulator-5554 shell ime list -a | grep -o "[^ :]*simplekeyboard[^ :]*" | head -1 | tr -d '\r' | tr -d '\n')
           if [ -z "$IME_ID" ]; then
-            IME_ID="rkkr.simplekeyboard.inputmethod/.latin.LatinIME"
+            IME_ID="rkr.simplekeyboard.inputmethod/.latin.LatinIME"
           fi
           echo "Using IME_ID: $IME_ID"
           $ADB -s emulator-5554 shell ime enable "$IME_ID"
@@ -299,12 +299,13 @@ jobs:
 
           echo "Starting watchdog..."
           (
+            set +e
             while true; do
               FOCUS=$($ADB -s emulator-5554 shell dumpsys window windows 2>/dev/null | grep -E 'mCurrentFocus' | awk -F'/' '{print $1}' | awk '{print $NF}' | tr -d '\r')
               if [ -n "$FOCUS" ] && [ "$FOCUS" != "mCurrentFocus=null" ]; then
                 if [ "$FOCUS" != "$PACKAGE_NAME" ] && \
                    [ "$FOCUS" != "com.android.permissioncontroller" ] && \
-                   [ "$FOCUS" != "rkkr.simplekeyboard.inputmethod" ]; then
+                   [ "$FOCUS" != "rkr.simplekeyboard.inputmethod" ]; then
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
