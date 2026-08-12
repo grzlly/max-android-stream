@@ -291,10 +291,21 @@ jobs:
           chmod +x click_text.sh
           
           export ADB="$ADB"
-          ./click_text.sh "Языки" || ./click_text.sh "Languages"
-          ./click_text.sh "Добавить клавиатуру" || ./click_text.sh "Add keyboard"
-          ./click_text.sh "Русский" || ./click_text.sh "Russian"
-          ./click_text.sh "Готово" || ./click_text.sh "Done"
+          
+          retry_click() {
+            for i in 1 2 3 4 5; do
+              if ./click_text.sh "$1"; then return 0; fi
+              if ./click_text.sh "$2"; then return 0; fi
+              echo "Waiting for $1 or $2..."
+              sleep 2
+            done
+            return 1
+          }
+          
+          retry_click "Языки" "Languages" || true
+          retry_click "Добавить клавиатуру" "Add keyboard" || true
+          retry_click "Русский" "Russian" || true
+          retry_click "Готово" "Done" || true
           
           $ADB -s emulator-5554 shell am force-stop com.google.android.inputmethod.latin
           
