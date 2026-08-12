@@ -2,9 +2,7 @@ name: Node 2 Stream (VNC)
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/node2.yml'
+  
 
 jobs:
   run-stream:
@@ -329,6 +327,7 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
 
 
 
