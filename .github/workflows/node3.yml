@@ -1,10 +1,6 @@
 name: Node 3 Stream (VNC)
 
-on:
-  workflow_dispatch:
-  
-
-jobs:
+on:\n  workflow_dispatch:\n  push:\n    paths:\n      - '.github/workflows/node3.yml'\njobs:
   run-stream:
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -302,6 +298,7 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
 
 
 
