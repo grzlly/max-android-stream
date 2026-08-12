@@ -229,11 +229,7 @@ jobs:
           sleep 5
 
           # 5. Launch scrcpy
-          DISPLAY=:0 scrcpy \
-              -s emulator-5554 \
-              --max-fps 30 \
-              --crop 720:1232:0:48 \
-              2>/dev/null &
+          DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 2>/dev/null &
           sleep 4
 
           # 6. Start VNC
@@ -302,6 +298,9 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
+
+
 
 
 
