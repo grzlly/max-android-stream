@@ -262,38 +262,17 @@ jobs:
           echo "Installing Simple Keyboard..."
           wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/latest/download/app-release.apk
           $ADB -s emulator-5554 shell settings put system system_locales ru-RU,en-US
+          $ADB -s emulator-5554 shell am broadcast -a android.intent.action.LOCALE_CHANGED
           $ADB -s emulator-5554 install -r simple.apk
           echo "Waiting 5s for IME registration..."
           sleep 5
           IME_ID=$($ADB -s emulator-5554 shell ime list -a | grep -o "[^ :]*simplekeyboard[^ :]*" | head -1 | tr -d '\r' | tr -d '\n')
           if [ -z "$IME_ID" ]; then
-            IME_ID="rkkr.simplekeyboard.inputmethod/.latin.LatinIME"
+            IME_ID="rkr.simplekeyboard.inputmethod/.latin.LatinIME"
           fi
           echo "Using IME_ID: $IME_ID"
           $ADB -s emulator-5554 shell ime enable "$IME_ID"
           $ADB -s emulator-5554 shell ime set "$IME_ID"
-          
-          SUBTYPE_HASH=$($ADB -s emulator-5554 shell dumpsys input_method | awk -v ime="$IME_ID" '
-              $0 ~ ime { in_ime=1 }
-              in_ime && /InputMethodSubtype/ { 
-                if (is_ru && current_hash) { print current_hash; exit }
-                in_subtype=1; current_hash=""; is_ru=0 
-              }
-              in_subtype && /mSubtypeHashCode=/ { split($0, a, "="); current_hash=a[2] }
-              in_subtype && /(mSubtypeLocale|languageTag).*ru/ { is_ru=1 }
-              in_ime && /mId=/ && $0 !~ ime { 
-                if (is_ru && current_hash) { print current_hash; exit }
-                in_ime=0 
-              }
-              END {
-                if (is_ru && current_hash) { print current_hash }
-              }
-            ' | tr -d '\r' | tr -d ' ')
-          
-          if [ -n "$SUBTYPE_HASH" ]; then
-            $ADB -s emulator-5554 shell settings put secure enabled_input_methods "${IME_ID};${SUBTYPE_HASH}"
-            $ADB -s emulator-5554 shell settings put secure selected_input_method_subtype "$SUBTYPE_HASH"
-          fi
           
           echo "Disabling Gboard..."
           $ADB -s emulator-5554 shell pm disable-user --user 0 com.google.android.inputmethod.latin || true
