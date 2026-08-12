@@ -277,7 +277,7 @@ jobs:
             $0 ~ ime { in_ime=1 }
             in_ime && /InputMethodSubtype/ { in_subtype=1; current_hash="" }
             in_subtype && /mSubtypeHashCode=/ { split($0, a, "="); current_hash=a[2] }
-            in_subtype && /mSubtypeLocale=ru/ { print current_hash; exit }
+            in_subtype && /(mSubtypeLocale|languageTag).*ru/ { print current_hash; exit }
             in_ime && /mId=/ && $0 !~ ime { in_ime=0 }
           ' | tr -d '\r' | tr -d ' ')
           
