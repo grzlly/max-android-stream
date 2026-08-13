@@ -329,10 +329,10 @@ jobs:
           done
             
           echo "Notifying local orchestrator that Node is ready..."
-          curl -s --max-time 3 -X POST http://127.0.0.1:8000/api/ready >/dev/null 2>&1 &
+          curl -s --max-time 3 -X POST http://127.0.0.1:8000/api/ready >/dev/null || true
 
           echo "Notifying balancer that Node 1 is ready..."
-          curl -s --max-time 3 -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "1", "status": "ready"}' >/dev/null 2>&1 &
+          curl -s --max-time 3 -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "1", "status": "ready"}' || true
 
           echo "Starting watchdog..."
           (
@@ -346,7 +346,7 @@ jobs:
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
-                  curl -s --max-time 3 -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "1", "status": "ready"}' >/dev/null 2>&1 &
+                  curl -s --max-time 3 -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "1", "status": "ready"}' || true
                 fi
               fi
               sleep 2
