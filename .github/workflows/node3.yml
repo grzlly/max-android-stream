@@ -12,7 +12,9 @@ jobs:
       group: node3
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    container: ghcr.io/grzlly/max-android-stream:docker-test
+    container:
+      image: ghcr.io/grzlly/max-android-stream:docker-test
+      options: --device /dev/kvm
     timeout-minutes: 360
     env:
       NODE_ID: 3
