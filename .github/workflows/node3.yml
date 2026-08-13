@@ -8,6 +8,9 @@ on:
 
 jobs:
   run-stream:
+    concurrency:
+      group: node3
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
