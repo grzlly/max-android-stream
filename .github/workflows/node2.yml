@@ -41,11 +41,10 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
 
-      - name: Cache and Install apt packages
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt x11-utils x11-xserver-utils scrcpy nodejs npm libblas3 liblapack3 libsdl2-2.0-0
-          version: 1.2
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt x11-utils x11-xserver-utils scrcpy nodejs npm
 
       - name: Setup Web UI and Orchestrator
         run: |
