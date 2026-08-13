@@ -302,10 +302,13 @@ jobs:
           export LIBGL_ALWAYS_SOFTWARE=1
           (
             while true; do
-              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 --no-audio >> /tmp/scrcpy.log 2>&1 || DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 >> /tmp/scrcpy.log 2>&1 || true
-              sleep 1
+              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 --no-audio > /tmp/scrcpy.log 2>&1 || DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 > /tmp/scrcpy.log 2>&1 || {
+                echo "scrcpy crashed! Last logs:"
+                tail -n 20 /tmp/scrcpy.log
+              }
+              sleep 2
             done
-          ) </dev/null >/dev/null 2>&1 &
+          ) &
           sleep 1
 
           # 6. Start VNC
