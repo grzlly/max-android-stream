@@ -295,6 +295,8 @@ jobs:
           echo "Launching $PACKAGE_NAME..."
           $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
+          echo "Notifying balancer that Node 2 is ready..."
+          curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
 
 
           echo "Starting watchdog..."
@@ -309,6 +311,8 @@ jobs:
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
+          echo "Notifying balancer that Node 2 is ready..."
+          curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
 
                 fi
               fi
@@ -338,25 +342,3 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
