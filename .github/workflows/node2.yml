@@ -275,10 +275,11 @@ jobs:
           $ADB start-server
           echo "ADB daemon started"
 
-          # 4. Start emulator from Snapshot!
+          # 4. Start emulator (Cold Boot to prevent MediaCodec crash)
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
+            -no-snapshot -no-skin -no-metrics \
             -no-window >/dev/null 2>&1 &
 
           echo "Waiting for ADB..."
@@ -290,7 +291,7 @@ jobs:
           done
 
           echo "Waiting for Android boot..."
-          for i in $(seq 1 120); do
+          for i in $(seq 1 240); do
             BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
             sleep 1
