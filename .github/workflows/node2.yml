@@ -298,9 +298,11 @@ jobs:
           done
 
           # 5. Launch scrcpy
+          export ADB="$ANDROID_HOME/platform-tools/adb"
+          export LIBGL_ALWAYS_SOFTWARE=1
           (
             while true; do
-              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 2>/dev/null || true
+              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 --no-audio >> /tmp/scrcpy.log 2>&1 || DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 >> /tmp/scrcpy.log 2>&1 || true
               sleep 1
             done
           ) </dev/null >/dev/null 2>&1 &
