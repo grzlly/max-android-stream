@@ -29,7 +29,7 @@ jobs:
 
       - name: Setup SSH key
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SSH_PRIVATE_KEY: ${ secrets.VPS_SSH_KEY }
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/vps_key
@@ -37,7 +37,7 @@ jobs:
 
       - name: Download APK from VPS
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_HOST: ${ secrets.VPS_HOST }
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
 
@@ -46,27 +46,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils x11-xserver-utils scrcpy nodejs npm
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Create AVD
-        run: |
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          mkdir -p $ANDROID_AVD_HOME
-          sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
-          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
-
-          echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-          echo "hw.keyboard=yes"    >> $ANDROID_AVD_HOME/max_device.avd/config.ini
-
       - name: Setup Web UI and Orchestrator
         run: |
           PACKAGE_NAME=$(aapt dump badging ./max.apk 2>/dev/null | grep "^package" | grep -oP "name='\K[^']+" | head -1 || echo "com.vk.im")
           echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
-
+          
           mkdir -p /opt/orchestrator
           cd /opt/orchestrator
           npm init -y
@@ -78,7 +62,7 @@ jobs:
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-              <title>Max Node ${NODE_ID}</title>
+              <title>Max Node 1</title>
               <style>
                   body { margin: 0; padding: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; }
                   iframe { width: 720px; height: 1280px; min-width: 720px; min-height: 1280px; flex-shrink: 0; border: none; display: none; transform-origin: top center; }
@@ -90,7 +74,7 @@ jobs:
           <body>
               <div id="loading">
                   <div class="spinner"></div>
-                  <h2 id="status-text">Запуск эмулятора (Node ${NODE_ID})...</h2>
+                  <h2 id="status-text">Запуск эмулятора (Node 1)...</h2>
                   <p>Это может занять 1-2 минуты</p>
               </div>
               
@@ -112,7 +96,7 @@ jobs:
                   resize();
 
                   function checkStatus() {
-                      fetch('/node${NODE_ID}/api/status')
+                      fetch('/node1/api/status')
                           .then(r => r.json())
                           .then(data => {
                               if (data.ready) {
@@ -120,9 +104,9 @@ jobs:
                                   iframe.style.display = 'block';
                                   const host = window.location.hostname;
                                   const port = window.location.port;
-                                  const path = 'node${NODE_ID}/websockify';
+                                  const path = 'node1/websockify';
                                   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-                                  iframe.src = '/node${NODE_ID}/vnc.html?autoconnect=true&resize=scale&host=' + host + '&port=' + port + '&path=' + path;
+                                  iframe.src = '/node1/vnc.html?autoconnect=true&resize=scale&host=' + host + '&port=' + port + '&path=' + path;
                               } else {
                                   statusText.textContent = 'Приложение запускается...';
                                   setTimeout(checkStatus, 3000);
@@ -146,7 +130,7 @@ jobs:
           
           const app = express();
           const ADB = process.env.ANDROID_HOME + '/platform-tools/adb';
-          const PACKAGE = '$PACKAGE_NAME';
+          const PACKAGE = '\$PACKAGE_NAME';
           let isReady = false;
 
           setTimeout(() => { isReady = true; }, 30000);
@@ -182,7 +166,6 @@ jobs:
             server.on('upgrade', wsProxy.upgrade);
           JSEOF
 
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -217,7 +200,7 @@ jobs:
           
           echo "Waiting for Android boot..."
           for i in $(seq 1 60); do
-            BOOT=$(adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '' || echo "")
+            BOOT=$(adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
             sleep 5
           done
@@ -264,7 +247,7 @@ jobs:
       - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
-          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
+          PACKAGE_NAME="${ env.PACKAGE_NAME }"
 
           # 1. Xvfb with HUGE screen
           Xvfb :0 -screen 0 1000x1500x24 +extension DAMAGE &
@@ -360,7 +343,7 @@ jobs:
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_HOST: ${ secrets.VPS_HOST }
         run: |
           (
             while true; do
@@ -369,33 +352,14 @@ jobs:
                   -o ServerAliveCountMax=10 \
                   -i ~/.ssh/vps_key \
                   -N \
-                  -R ${{ env.TUNNEL_PORT }}:localhost:8000 \
+                  -R ${ env.TUNNEL_PORT }:localhost:8000 \
                   root@$VPS_HOST || true
               echo "SSH tunnel died. Restarting in 5 seconds..."
               sleep 5
             done
           ) &
-          echo "Tunnel loop started: Node ${{ env.NODE_ID }} -> VPS:${{ env.TUNNEL_PORT }}"
+          echo "Tunnel loop started: Node ${ env.NODE_ID } -> VPS:${ env.TUNNEL_PORT }"
 
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
