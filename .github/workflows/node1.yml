@@ -318,7 +318,11 @@ jobs:
           node server.js >/dev/null 2>&1 &
           
           echo "Launching $PACKAGE_NAME..."
-          $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
+          for i in $(seq 1 15); do
+            $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 && echo "App launched!" && break
+            echo "Activity Manager not ready, retrying..."
+            sleep 3
+          done
             
           echo "Notifying balancer that Node 1 is ready..."
           curl -s -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "1", "status": "ready"}' || true
