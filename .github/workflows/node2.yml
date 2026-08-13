@@ -44,8 +44,8 @@ jobs:
       - name: Cache and Install apt packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt x11-utils x11-xserver-utils scrcpy nodejs npm libblas3
-          version: 1.1
+          packages: xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt x11-utils x11-xserver-utils scrcpy nodejs npm libblas3 liblapack3 libsdl2-2.0-0
+          version: 1.2
 
       - name: Setup Web UI and Orchestrator
         run: |
