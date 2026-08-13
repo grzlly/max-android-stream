@@ -265,7 +265,7 @@ jobs:
 
           # 2. Fluxbox: force window to 0,0
           mkdir -p ~/.fluxbox
-          printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
+          printf '[app] (name=scrcpy)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n[app] (class=scrcpy)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
           fluxbox -display :0 >/dev/null 2>&1 &
           sleep 1
@@ -302,7 +302,7 @@ jobs:
           export LIBGL_ALWAYS_SOFTWARE=1
           (
             while true; do
-              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 --no-audio > /tmp/scrcpy.log 2>&1 || DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 > /tmp/scrcpy.log 2>&1 || {
+              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 --window-x 0 --window-y 0 --window-borderless --no-audio > /tmp/scrcpy.log 2>&1 || DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 --window-x 0 --window-y 0 --window-borderless > /tmp/scrcpy.log 2>&1 || {
                 echo "scrcpy crashed! Last logs:"
                 tail -n 20 /tmp/scrcpy.log
               }
@@ -313,9 +313,9 @@ jobs:
 
           # 6. Start VNC
           if xdpyinfo -display :0 -queryExtensions | grep -q DAMAGE; then
-            x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noncache -shared -defer 0
+            x11vnc -display :0 -clip 720x1232+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noncache -shared -defer 0
           else
-            x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -wait 10 -noncache -shared -defer 0
+            x11vnc -display :0 -clip 720x1232+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -wait 10 -noncache -shared -defer 0
           fi
           
           # 7. Start websockify
