@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     unzip \
     git \
+    openssh-client \
+    netcat-openbsd \
     openjdk-17-jre-headless \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
