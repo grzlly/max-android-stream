@@ -182,9 +182,89 @@ jobs:
             server.on('upgrade', wsProxy.upgrade);
           JSEOF
 
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Restore AVD Cache
+        id: avd-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/.android/avd
+            /usr/local/lib/android/sdk/system-images
+          key: avd-node-v1
+
+      - name: Build AVD and Snapshot (If not cached)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        run: |
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          mkdir -p $ANDROID_AVD_HOME
+          echo "y" | sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
+          echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
+
+          echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.gpu.enabled=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.keyboard=yes"    >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+
+          # Start Emulator for Cold Boot
+          $ANDROID_HOME/emulator/emulator @max_device -no-audio -no-boot-anim -gpu swiftshader_indirect -no-window &
+          
+          echo "Waiting for ADB..."
+          adb wait-for-device
+          
+          echo "Waiting for Android boot..."
+          for i in $(seq 1 60); do
+            BOOT=$(adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '' || echo "")
+            [ "$BOOT" = "1" ] && echo "Android booted!" && break
+            sleep 5
+          done
+          sleep 5
+
+          echo "Installing Apps and Configurations..."
+          wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/download/146/app-release.apk
+          wget -qO appium.apk https://github.com/appium/io.appium.settings/releases/download/v8.0.8/settings_apk-debug.apk
+          adb -s emulator-5554 install -r appium.apk
+          adb -s emulator-5554 shell pm grant io.appium.settings android.permission.CHANGE_CONFIGURATION
+          adb -s emulator-5554 shell am broadcast -a io.appium.settings.locale -n io.appium.settings/.receivers.LocaleSettingReceiver --es lang ru --es country RU
+          sleep 3
+          adb -s emulator-5554 install -r simple.apk
+          sleep 5
+          IME_ID=$(adb -s emulator-5554 shell ime list -a | grep -o "[^ :]*simplekeyboard[^ :]*" | head -1 | tr -d '\r' | tr -d '\n')
+          [ -z "$IME_ID" ] && IME_ID="rkr.simplekeyboard.inputmethod/.latin.LatinIME"
+          adb -s emulator-5554 shell ime enable "$IME_ID"
+          adb -s emulator-5554 shell ime set "$IME_ID"
+          adb -s emulator-5554 shell pm disable-user --user 0 com.google.android.inputmethod.latin || true
+          adb -s emulator-5554 shell pm disable-user --user 0 com.android.inputmethod.latin || true
+
+          adb -s emulator-5554 install -r max.apk
+          adb -s emulator-5554 shell settings put secure lockscreen.disabled 1
+          adb -s emulator-5554 shell settings put global window_animation_scale 0
+          adb -s emulator-5554 shell settings put global transition_animation_scale 0
+          adb -s emulator-5554 shell settings put global animator_duration_scale 0
+          adb -s emulator-5554 shell settings put global policy_control immersive.full=*
+          adb -s emulator-5554 shell pm disable-user --user 0 com.android.chrome >/dev/null 2>&1 || true
+          
+          echo "Gracefully shutting down to save snapshot..."
+          adb -s emulator-5554 emu kill
+          while pgrep -x emulator >/dev/null; do sleep 1; done
+          echo "Snapshot saved!"
+
+      - name: Save AVD Cache
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /home/runner/.android/avd
+            /usr/local/lib/android/sdk/system-images
+          key: avd-node-v1
+
       - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
+          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
 
           # 1. Xvfb with HUGE screen
           Xvfb :0 -screen 0 1000x1500x24 +extension DAMAGE &
@@ -207,11 +287,10 @@ jobs:
           $ADB start-server
           echo "ADB daemon started"
 
-          # 4. Start emulator
+          # 4. Start emulator from Snapshot!
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-snapshot -no-skin -no-metrics \
             -no-window &
 
           echo "Waiting for ADB..."
@@ -253,51 +332,12 @@ jobs:
           export ANDROID_HOME=$ANDROID_HOME
           cd /opt/orchestrator
           node server.js &
-
-      - name: Install Max and apply Kiosk Mode
-        run: |
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
-
-          echo "Installing Simple Keyboard..."
-          wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/download/146/app-release.apk
-          echo "Setting system language to Russian via Appium Settings..."
-          wget -qO appium.apk https://github.com/appium/io.appium.settings/releases/download/v8.0.8/settings_apk-debug.apk
-          $ADB -s emulator-5554 install -r appium.apk
-          $ADB -s emulator-5554 shell pm grant io.appium.settings android.permission.CHANGE_CONFIGURATION
-          $ADB -s emulator-5554 shell am broadcast -a io.appium.settings.locale -n io.appium.settings/.receivers.LocaleSettingReceiver --es lang ru --es country RU
-          sleep 3
-          $ADB -s emulator-5554 install -r simple.apk
-          echo "Waiting 5s for IME registration..."
-          sleep 5
-          IME_ID=$($ADB -s emulator-5554 shell ime list -a | grep -o "[^ :]*simplekeyboard[^ :]*" | head -1 | tr -d '\r' | tr -d '\n')
-          if [ -z "$IME_ID" ]; then
-            IME_ID="rkr.simplekeyboard.inputmethod/.latin.LatinIME"
-          fi
-          echo "Using IME_ID: $IME_ID"
-          $ADB -s emulator-5554 shell ime enable "$IME_ID"
-          $ADB -s emulator-5554 shell ime set "$IME_ID"
           
-          echo "Disabling Gboard..."
-          $ADB -s emulator-5554 shell pm disable-user --user 0 com.google.android.inputmethod.latin || true
-          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.inputmethod.latin || true
-
-          echo "Installing Max APK..."
-          $ADB -s emulator-5554 install -r max.apk
-
-          $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
-          $ADB -s emulator-5554 shell settings put global window_animation_scale 0
-          $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
-          $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
-            $ADB -s emulator-5554 shell settings put global policy_control immersive.full=*
-          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.chrome >/dev/null 2>&1 || true
-
           echo "Launching $PACKAGE_NAME..."
           $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
           echo "Notifying balancer that Node 3 is ready..."
           curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "3", "status": "ready"}' || true
-
 
           echo "Starting watchdog..."
           (
@@ -311,9 +351,7 @@ jobs:
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
-          echo "Notifying balancer that Node 3 is ready..."
-          curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "3", "status": "ready"}' || true
-
+                  curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "3", "status": "ready"}' || true
                 fi
               fi
               sleep 2
@@ -342,3 +380,25 @@ jobs:
       - name: Keep alive (up to 5h 50min)
         run: |
           sleep 20000
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
