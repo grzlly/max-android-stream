@@ -12,13 +12,14 @@ jobs:
       group: node1
       cancel-in-progress: true
     runs-on: ubuntu-latest
+    container: ghcr.io/grzlly/max-android-stream:latest
     timeout-minutes: 360
     env:
       NODE_ID: 1
       TUNNEL_PORT: 8101
       PACKAGE_NAME: ""
-      ANDROID_AVD_HOME: /home/runner/.android/avd
-      ANDROID_USER_HOME: /home/runner/.android
+      ANDROID_AVD_HOME: /root/.android/avd
+      ANDROID_USER_HOME: /root/.android
 
     steps:
       - name: Checkout
@@ -26,7 +27,7 @@ jobs:
 
       - name: Enable KVM
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
@@ -44,11 +45,6 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
 
-      - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt x11-utils x11-xserver-utils scrcpy nodejs npm
-
       - name: Setup Web UI and Orchestrator
         run: |
           PACKAGE_NAME=$(aapt dump badging ./max.apk 2>/dev/null | grep "^package" | grep -oP "name='\K[^']+" | head -1 || echo "com.vk.im")
@@ -59,7 +55,7 @@ jobs:
           npm init -y
           npm install express http-proxy-middleware
 
-          cat << HTMLEOF | sudo tee /opt/orchestrator/index.html
+          cat << HTMLEOF | tee /opt/orchestrator/index.html
           <!DOCTYPE html>
           <html>
           <head>
@@ -126,7 +122,7 @@ jobs:
           </html>
           HTMLEOF
 
-          cat << JSEOF | sudo tee /opt/orchestrator/server.js
+          cat << JSEOF | tee /opt/orchestrator/server.js
           const express = require('express');
           const { createProxyMiddleware } = require('http-proxy-middleware');
           const { execSync } = require('child_process');
@@ -173,25 +169,6 @@ jobs:
           const server = app.listen(8000, '0.0.0.0', () => console.log('Orchestrator running on port 8000'));
             server.on('upgrade', wsProxy.upgrade);
           JSEOF
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Restore AVD Cache
-        id: avd-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /home/runner/.android/avd
-            /usr/local/lib/android/sdk/system-images
-          key: avd-node-v1
-
-      - name: Build AVD and Snapshot (If not cached)
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        run: |
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          mkdir -p $ANDROID_AVD_HOME
-          echo "y" | sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64"
           echo "no" | avdmanager create avd -n max_device -k "system-images;android-30;google_apis;x86_64" --force
 
           echo "hw.lcd.width=720"   >> $ANDROID_AVD_HOME/max_device.avd/config.ini
@@ -248,8 +225,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            /home/runner/.android/avd
-            /usr/local/lib/android/sdk/system-images
+            /root/.android/avd
+            /opt/android-sdk/system-images
           key: avd-node-v1
 
       - name: Start display, emulator and VNC
