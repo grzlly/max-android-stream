@@ -44,7 +44,7 @@ jobs:
       - name: Cache and Install apt packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt xdotool x11-utils x11-xserver-utils scrcpy nodejs npm
+          packages: xvfb x11vnc novnc websockify libpulse0 libgl1 fluxbox aapt x11-utils x11-xserver-utils scrcpy nodejs npm
           version: 1.0
 
       - name: Setup Web UI and Orchestrator
@@ -134,7 +134,12 @@ jobs:
           const PACKAGE = '\$PACKAGE_NAME';
           let isReady = false;
 
-          setTimeout(() => { isReady = true; }, 30000);
+          setTimeout(() => { isReady = true; }, 60000); // 60s fallback
+
+          app.post('/api/ready', (req, res) => {
+            isReady = true;
+            res.json({ ok: true });
+          });
 
           app.post('/api/reset', (req, res) => {
             console.log('[Node] Reset requested...');
@@ -263,7 +268,7 @@ jobs:
           printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
           fluxbox -display :0 >/dev/null 2>&1 &
-          sleep 2
+          sleep 1
           
           xsetroot -solid black -display :0 >/dev/null 2>&1 &
 
@@ -278,29 +283,28 @@ jobs:
             -no-window >/dev/null 2>&1 &
 
           echo "Waiting for ADB..."
-          for i in $(seq 1 36); do
+          for i in $(seq 1 180); do
             STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
             [ "$STATE" = "device" ] && echo "ADB online!" && break
             [ "$STATE" = "offline" ] && $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
-            sleep 5
+            sleep 1
           done
 
           echo "Waiting for Android boot..."
-          for i in $(seq 1 60); do
+          for i in $(seq 1 120); do
             BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
             [ "$BOOT" = "1" ] && echo "Android booted!" && break
-            sleep 5
+            sleep 1
           done
-          sleep 5
 
           # 5. Launch scrcpy
           (
             while true; do
               DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 2>/dev/null
-              sleep 2
+              sleep 1
             done
           ) &
-          sleep 4
+          sleep 1
 
           # 6. Start VNC
           if xdpyinfo -display :0 -queryExtensions | grep -q DAMAGE; then
@@ -324,6 +328,9 @@ jobs:
             sleep 3
           done
             
+          echo "Notifying local orchestrator that Node is ready..."
+          curl -s -X POST http://127.0.0.1:8000/api/ready >/dev/null || true
+
           echo "Notifying balancer that Node 1 is ready..."
           curl -s -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "1", "status": "ready"}' || true
 
