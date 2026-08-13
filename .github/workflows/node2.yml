@@ -29,7 +29,7 @@ jobs:
 
       - name: Setup SSH key
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SSH_PRIVATE_KEY: ${ secrets.VPS_SSH_KEY }
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/vps_key
@@ -37,7 +37,7 @@ jobs:
 
       - name: Download APK from VPS
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_HOST: ${ secrets.VPS_HOST }
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
 
@@ -193,7 +193,7 @@ jobs:
           echo "hw.keyboard=yes"    >> $ANDROID_AVD_HOME/max_device.avd/config.ini
 
           # Start Emulator for Cold Boot
-          $ANDROID_HOME/emulator/emulator @max_device -no-audio -no-boot-anim -gpu swiftshader_indirect -no-window &
+          $ANDROID_HOME/emulator/emulator @max_device -no-audio -no-boot-anim -gpu swiftshader_indirect -no-window >/dev/null 2>&1 &
           
           echo "Waiting for ADB..."
           adb wait-for-device
@@ -247,10 +247,10 @@ jobs:
       - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
-          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
+          PACKAGE_NAME="${ env.PACKAGE_NAME }"
 
           # 1. Xvfb with HUGE screen
-          Xvfb :0 -screen 0 1000x1500x24 +extension DAMAGE &
+          Xvfb :0 -screen 0 1000x1500x24 +extension DAMAGE >/dev/null 2>&1 &
           export DISPLAY=:0
           for i in $(seq 1 30); do
             xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
@@ -261,10 +261,10 @@ jobs:
           mkdir -p ~/.fluxbox
           printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
           printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
-          fluxbox -display :0 2>/dev/null &
+          fluxbox -display :0 >/dev/null 2>&1 &
           sleep 2
           
-          xsetroot -solid black -display :0 &
+          xsetroot -solid black -display :0 >/dev/null 2>&1 &
 
           # 3. Start ADB
           $ADB start-server
@@ -274,7 +274,7 @@ jobs:
           $ANDROID_HOME/emulator/emulator @max_device \
             -no-audio -no-boot-anim \
             -gpu swiftshader_indirect \
-            -no-window &
+            -no-window >/dev/null 2>&1 &
 
           echo "Waiting for ADB..."
           for i in $(seq 1 36); do
@@ -309,18 +309,18 @@ jobs:
           fi
           
           # 7. Start websockify
-          websockify 8001 localhost:5900 &
+          websockify 8001 localhost:5900 >/dev/null 2>&1 &
 
           # 8. Start Orchestrator
           export ANDROID_HOME=$ANDROID_HOME
           cd /opt/orchestrator
-          node server.js &
+          node server.js >/dev/null 2>&1 &
           
           echo "Launching $PACKAGE_NAME..."
           $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
           echo "Notifying balancer that Node 2 is ready..."
-          curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
+          curl -s -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
 
           echo "Starting watchdog..."
           (
@@ -334,7 +334,7 @@ jobs:
                   [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
                   $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
             
-                  curl -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
+                  curl -s -o /dev/null -X POST http://185.194.177.44:8000/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
                 fi
               fi
               sleep 2
@@ -343,7 +343,7 @@ jobs:
 
       - name: Open SSH Reverse Tunnel to VPS
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_HOST: ${ secrets.VPS_HOST }
         run: |
           (
             while true; do
@@ -352,13 +352,13 @@ jobs:
                   -o ServerAliveCountMax=10 \
                   -i ~/.ssh/vps_key \
                   -N \
-                  -R ${{ env.TUNNEL_PORT }}:localhost:8000 \
+                  -R ${ env.TUNNEL_PORT }:localhost:8000 \
                   root@$VPS_HOST || true
               echo "SSH tunnel died. Restarting in 5 seconds..."
               sleep 5
             done
           ) &
-          echo "Tunnel loop started: Node ${{ env.NODE_ID }} -> VPS:${{ env.TUNNEL_PORT }}"
+          echo "Tunnel loop started: Node ${ env.NODE_ID } -> VPS:${ env.TUNNEL_PORT }"
 
       - name: Keep alive (up to 5h 50min)
         run: |
