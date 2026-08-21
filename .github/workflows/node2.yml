@@ -245,6 +245,9 @@ jobs:
 
           $ADB -s emulator-5554 install -r ./max.apk
           $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
+          $ADB -s emulator-5554 shell svc power stayon true
+          $ADB -s emulator-5554 shell settings put system screen_off_timeout 2147483647
+          $ADB -s emulator-5554 shell input keyevent KEYCODE_WAKEUP
           $ADB -s emulator-5554 shell settings put global window_animation_scale 0
           $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
           $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
