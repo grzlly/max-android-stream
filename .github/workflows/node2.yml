@@ -1,0 +1,333 @@
+name: Node 2 Stream (VNC)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/node2.yml'
+
+jobs:
+  run-stream:
+    concurrency:
+      group: node2
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/grzlly/max-android-stream:main
+      options: --device /dev/kvm
+    timeout-minutes: 360
+    env:
+      NODE_ID: 2
+      TUNNEL_PORT: 8102
+      PACKAGE_NAME: ""
+      ANDROID_AVD_HOME: /root/.android/avd
+      ANDROID_USER_HOME: /root/.android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+
+      - name: Download APK from VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
+
+      - name: Setup Web UI and Orchestrator
+        run: |
+          PACKAGE_NAME=$(aapt dump badging ./max.apk 2>/dev/null | grep "^package" | grep -oP "name='\K[^']+" | head -1 || echo "com.vk.im")
+          echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
+          
+          mkdir -p /opt/orchestrator
+          ls -la /usr/share/novnc || true
+          cd /opt/orchestrator
+          npm init -y
+          npm install express@4.18.2 http-proxy-middleware@2.0.7
+
+          cat << HTMLEOF | tee /opt/orchestrator/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+              <title>Max Node 2</title>
+              <style>
+                  body { margin: 0; padding: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; }
+                  iframe { width: 720px; height: 1280px; min-width: 720px; min-height: 1280px; flex-shrink: 0; border: none; display: none; transform-origin: top center; }
+                  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%; padding: 20px; box-sizing: border-box; }
+                  .spinner { border: 4px solid #333; border-top: 4px solid #ffffff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+                  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+              </style>
+          </head>
+          <body>
+              <div id="loading">
+                  <div class="spinner"></div>
+                  <h2 id="status-text">Запуск эмулятора (Node 2)...</h2>
+                  <p>Это может занять 1-2 минуты</p>
+              </div>
+              
+              <iframe id="vnc-frame" src=""></iframe>
+
+              <script>
+                  const loading = document.getElementById('loading');
+                  const statusText = document.getElementById('status-text');
+                  const iframe = document.getElementById('vnc-frame');
+                  
+                  function resize() {
+                      const pr = 720 / 1280;
+                      const wr = window.innerWidth / window.innerHeight;
+                      const scale = wr < pr ? window.innerWidth / 720 : window.innerHeight / 1280;
+                      iframe.style.transform = 'scale(' + scale + ')';
+                      document.body.style.height = (1280 * scale) + 'px';
+                  }
+                  window.addEventListener('resize', resize);
+                  resize();
+
+                  function checkStatus() {
+                      fetch('/node2/api/status')
+                          .then(r => r.json())
+                          .then(data => {
+                              if (data.ready) {
+                                  loading.style.display = 'none';
+                                  iframe.style.display = 'block';
+                                  const host = window.location.hostname;
+                                  const port = window.location.port;
+                                  const path = 'node2/websockify';
+                                  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                                  iframe.src = '/node2/vnc.html?autoconnect=true&resize=scale&host=' + host + '&port=' + port + '&path=' + path;
+                              } else {
+                                  statusText.textContent = 'Приложение запускается...';
+                                  setTimeout(checkStatus, 3000);
+                              }
+                          })
+                          .catch(() => {
+                              statusText.textContent = 'Подключение к серверу...';
+                              setTimeout(checkStatus, 3000);
+                          });
+                  }
+                  checkStatus();
+              </script>
+          </body>
+          </html>
+          HTMLEOF
+
+          cat << JSEOF | tee /opt/orchestrator/server.js
+          const express = require('express');
+          const { createProxyMiddleware } = require('http-proxy-middleware');
+          const { execSync } = require('child_process');
+          
+          const app = express();
+          const ADB = process.env.ANDROID_HOME + '/platform-tools/adb';
+          const PACKAGE = '\$PACKAGE_NAME';
+          let isReady = false;
+
+          setTimeout(() => { isReady = true; }, 60000); // 60s fallback
+
+          app.post('/api/ready', (req, res) => {
+            isReady = true;
+            res.json({ ok: true });
+          });
+
+          app.post('/api/reset', (req, res) => {
+            console.log('[Node] Reset requested...');
+            isReady = false;
+            try {
+              execSync(ADB + ' -s emulator-5554 shell pm clear ' + PACKAGE, { timeout: 15000 });
+              execSync(ADB + ' -s emulator-5554 shell monkey -p ' + PACKAGE + ' -c android.intent.category.LAUNCHER 1', { timeout: 10000 });
+              setTimeout(() => { isReady = true; }, 3000);
+              res.json({ ok: true });
+            } catch(e) {
+              isReady = true;
+              res.json({ ok: true, warn: e.message });
+            }
+          });
+
+          app.get('/api/status', (req, res) => {
+              res.json({ ready: isReady });
+          });
+
+          const wsProxy = createProxyMiddleware({ target: 'http://127.0.0.1:8001', ws: true, changeOrigin: true });
+            app.use('/websockify', wsProxy);
+
+          app.get('/', (req, res) => {
+              res.sendFile(__dirname + '/index.html');
+          });
+
+          app.use(express.static('/usr/share/novnc'));
+
+          const server = app.listen(8000, '0.0.0.0', () => console.log('Orchestrator running on port 8000'));
+            server.on('upgrade', wsProxy.upgrade);
+          JSEOF
+      - name: Start display, emulator and VNC
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          PACKAGE_NAME="${{ env.PACKAGE_NAME }}"
+
+          # 1. Xvfb with HUGE screen
+          Xvfb :0 -screen 0 1000x1500x24 +extension DAMAGE >/dev/null 2>&1 &
+          export DISPLAY=:0
+          for i in $(seq 1 30); do
+            xdpyinfo -display :0 >/dev/null 2>&1 && echo "Xvfb ready" && break
+            sleep 1
+          done
+
+          # 2. Fluxbox: force window to 0,0
+          mkdir -p ~/.fluxbox
+          printf '[app] (.*)\n  [Deco] {NONE}\n  [Position] (UPPERLEFT) {0 0}\n[end]\n' > ~/.fluxbox/apps
+          printf 'session.screen0.toolbar.visible: false\n' > ~/.fluxbox/init
+          fluxbox -display :0 >/dev/null 2>&1 &
+          sleep 1
+          
+          xsetroot -solid black -display :0 >/dev/null 2>&1 &
+
+          # 3. Start ADB
+          $ADB start-server
+          echo "ADB daemon started"
+
+          # 3.5 Fix AVD config
+          echo "hw.lcd.width=720" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.lcd.height=1280" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.lcd.density=320" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.mainKeys=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+          echo "hw.keyboard=yes" >> $ANDROID_AVD_HOME/max_device.avd/config.ini
+
+          # 4. Start emulator (Cold Boot to prevent MediaCodec crash)
+          $ANDROID_HOME/emulator/emulator @max_device \
+            -no-audio -no-boot-anim \
+            -gpu swiftshader_indirect \
+            -no-snapshot -no-skin -no-metrics \
+            -no-window >/dev/null 2>&1 &
+
+          echo "Waiting for ADB..."
+          for i in $(seq 1 180); do
+            STATE=$($ADB -s emulator-5554 get-state 2>/dev/null || echo "unknown")
+            [ "$STATE" = "device" ] && echo "ADB online!" && break
+            [ "$STATE" = "offline" ] && $ADB -s emulator-5554 reconnect offline 2>/dev/null || true
+            sleep 1
+          done
+
+          echo "Waiting for Android boot..."
+          for i in $(seq 1 240); do
+            BOOT=$($ADB -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            [ "$BOOT" = "1" ] && echo "Android booted!" && break
+            sleep 1
+          done
+
+          echo "Installing Apps and Configurations..."
+          wget -qO simple.apk https://github.com/rkkr/simple-keyboard/releases/download/146/app-release.apk
+          wget -qO appium.apk https://github.com/appium/io.appium.settings/releases/download/v8.0.8/settings_apk-debug.apk
+          $ADB -s emulator-5554 install -r appium.apk
+          $ADB -s emulator-5554 shell pm grant io.appium.settings android.permission.CHANGE_CONFIGURATION
+          $ADB -s emulator-5554 shell am broadcast -a io.appium.settings.locale -n io.appium.settings/.receivers.LocaleSettingReceiver --es lang ru --es country RU
+          sleep 3
+          $ADB -s emulator-5554 install -r simple.apk
+          sleep 5
+          IME_ID=$($ADB -s emulator-5554 shell ime list -a | grep -o "[^ :]*simplekeyboard[^ :]*" | head -1 | tr -d '\r' | tr -d '\n')
+          [ -z "$IME_ID" ] && IME_ID="rkr.simplekeyboard.inputmethod/.latin.LatinIME"
+          $ADB -s emulator-5554 shell ime enable "$IME_ID"
+          $ADB -s emulator-5554 shell ime set "$IME_ID"
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.google.android.inputmethod.latin || true
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.inputmethod.latin || true
+
+          $ADB -s emulator-5554 install -r ./max.apk
+          $ADB -s emulator-5554 shell settings put secure lockscreen.disabled 1
+          $ADB -s emulator-5554 shell settings put global window_animation_scale 0
+          $ADB -s emulator-5554 shell settings put global transition_animation_scale 0
+          $ADB -s emulator-5554 shell settings put global animator_duration_scale 0
+          $ADB -s emulator-5554 shell settings put global policy_control immersive.full=*
+          $ADB -s emulator-5554 shell pm disable-user --user 0 com.android.chrome >/dev/null 2>&1 || true
+
+          # 5. Launch scrcpy
+          (
+            while true; do
+              DISPLAY=:0 scrcpy -s emulator-5554 --max-fps 30 --crop 720:1232:0:48 2>/dev/null
+              sleep 2
+            done
+          ) &
+          sleep 4
+
+          # 6. Start VNC
+          if xdpyinfo -display :0 -queryExtensions | grep -q DAMAGE; then
+            x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noncache -shared -defer 0
+          else
+            x11vnc -display :0 -clip 720x1280+0+0 -forever -nopw -rfbport 5900 -bg -quiet -noxdamage -wait 10 -noncache -shared -defer 0
+          fi
+          
+          # 7. Start websockify
+          websockify 8001 localhost:5900 >/dev/null 2>&1 &
+
+          # 8. Start Orchestrator
+          export ANDROID_HOME=$ANDROID_HOME
+          sed -i 's/ctrl\.type/ctrl \&\& ctrl.type/g' /usr/share/novnc/app/ui.js
+          sed -i 's/app\/ui\.js/app\/ui.js?v=2/g' /usr/share/novnc/vnc.html
+          ls -la /usr/share/novnc || true
+          cd /opt/orchestrator
+          node server.js >/opt/orchestrator/server.log 2>&1 &
+          tail -f /opt/orchestrator/server.log &
+          
+          echo "Launching $PACKAGE_NAME..."
+          for i in $(seq 1 15); do
+            $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 && echo "App launched!" && break
+            echo "Activity Manager not ready, retrying..."
+            sleep 3
+          done
+            
+          echo "Notifying local orchestrator that Node is ready..."
+          curl -s --max-time 3 -X POST http://127.0.0.1:8000/api/ready >/dev/null || true
+
+          echo "Starting watchdog..."
+          (
+            set +e
+            while true; do
+              FOCUS=$($ADB -s emulator-5554 shell dumpsys window windows 2>/dev/null | grep -E 'mCurrentFocus' | awk -F'/' '{print $1}' | awk '{print $NF}' | tr -d '\r')
+              if [ -n "$FOCUS" ] && [ "$FOCUS" != "mCurrentFocus=null" ]; then
+                if [ "$FOCUS" != "$PACKAGE_NAME" ] && \
+                   [ "$FOCUS" != "com.android.permissioncontroller" ] && \
+                   [ "$FOCUS" != "rkr.simplekeyboard.inputmethod" ]; then
+                  [ "$FOCUS" != "android" ] && $ADB -s emulator-5554 shell am force-stop "$FOCUS" >/dev/null 2>&1 || true
+                  $ADB -s emulator-5554 shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
+            
+                  curl -s --max-time 3 -o /dev/null -X POST https://max.grzly.ru/ping -H "Content-Type: application/json" -d '{"nodeId": "2", "status": "ready"}' || true
+                fi
+              fi
+              sleep 2
+            done
+          ) </dev/null >/dev/null 2>&1 &
+
+      - name: Open SSH Reverse Tunnel to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          (
+            while true; do
+              ssh -o StrictHostKeyChecking=no \
+                  -o ServerAliveInterval=30 \
+                  -o ServerAliveCountMax=10 \
+                  -i ~/.ssh/vps_key \
+                  -N \
+                  -R ${{ env.TUNNEL_PORT }}:127.0.0.1:8000 \
+                  root@$VPS_HOST || true
+              echo "SSH tunnel died. Restarting in 5 seconds..."
+              sleep 5
+            done
+          ) &
+          echo "Tunnel loop started: Node ${{ env.NODE_ID }} -> VPS:${{ env.TUNNEL_PORT }}"
+
+      - name: Wait for tunnel and notify balancer
+        run: |
+          echo "Waiting 5 seconds for SSH tunnel to establish..."
+          sleep 5
+          echo "Notifying balancer that Node ${{ env.NODE_ID }} is ready..."
+          curl -s --max-time 3 -o /dev/null -X POST https://max.grzly.ru/ping -H "Content-Type: application/json" -d "{\"nodeId\": \"${{ env.NODE_ID }}\", \"status\": \"ready\"}" || true
+
+      - name: Keep alive (up to 5h 50min)
+        run: |
+          sleep 20000
