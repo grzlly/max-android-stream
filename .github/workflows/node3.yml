@@ -32,8 +32,11 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/vps_key
+          echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/vps_key
           chmod 600 ~/.ssh/vps_key
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/vps_key
+          ssh-keyscan -H $VPS_HOST >> ~/.ssh/known_hosts || true
 
       - name: Download APK from VPS
         env:
@@ -41,24 +44,29 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/vps_key root@$VPS_HOST:/opt/max/max.apk ./max.apk
 
-      - name: Setup Web UI and Orchestrator
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Prepare Local Orchestrator
         run: |
           PACKAGE_NAME=$(aapt dump badging ./max.apk 2>/dev/null | grep "^package" | grep -oP "name='\K[^']+" | head -1 || echo "com.vk.im")
           echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
-          
+
           mkdir -p /opt/orchestrator
           ls -la /usr/share/novnc || true
           cd /opt/orchestrator
           npm init -y
           npm install express@4.18.2 http-proxy-middleware@2.0.7
 
-          cat << HTMLEOF | tee /opt/orchestrator/index.html
+          cat << 'HTMLEOF' | tee /opt/orchestrator/index.html
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-              <title>Max Node 3</title>
+              <title>Max Node ${{ env.NODE_ID }}</title>
               <style>
                   body { margin: 0; padding: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; }
                   iframe { width: 720px; height: 1280px; min-width: 720px; min-height: 1280px; flex-shrink: 0; border: none; display: none; transform-origin: top center; }
@@ -70,12 +78,10 @@ jobs:
           <body>
               <div id="loading">
                   <div class="spinner"></div>
-                  <h2 id="status-text">Запуск эмулятора (Node 3)...</h2>
+                  <h2 id="status-text">Запуск эмулятора (Node ${{ env.NODE_ID }})...</h2>
                   <p>Это может занять 1-2 минуты</p>
               </div>
-              
               <iframe id="vnc-frame" src=""></iframe>
-
               <script>
                   const loading = document.getElementById('loading');
                   const statusText = document.getElementById('status-text');
@@ -92,7 +98,7 @@ jobs:
                   resize();
 
                   function checkStatus() {
-                      fetch('/node3/api/status')
+                      fetch('/node${{ env.NODE_ID }}/api/status')
                           .then(r => r.json())
                           .then(data => {
                               if (data.ready) {
@@ -100,9 +106,9 @@ jobs:
                                   iframe.style.display = 'block';
                                   const host = window.location.hostname;
                                   const port = window.location.port;
-                                  const path = 'node3/websockify';
+                                  const path = 'node${{ env.NODE_ID }}/websockify';
                                   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-                                  iframe.src = '/node3/vnc.html?autoconnect=true&resize=scale&host=' + host + '&port=' + port + '&path=' + path;
+                                  iframe.src = '/node${{ env.NODE_ID }}/vnc.html?autoconnect=true&resize=scale&host=' + host + '&port=' + port + '&path=' + path;
                               } else {
                                   statusText.textContent = 'Приложение запускается...';
                                   setTimeout(checkStatus, 3000);
@@ -119,35 +125,35 @@ jobs:
           </html>
           HTMLEOF
 
-          cat << JSEOF | tee /opt/orchestrator/server.js
+          cat << 'JSEOF' | tee /opt/orchestrator/server.js
           const express = require('express');
           const { createProxyMiddleware } = require('http-proxy-middleware');
           const { execSync } = require('child_process');
-          
+
           const app = express();
           const ADB = process.env.ANDROID_HOME + '/platform-tools/adb';
-          const PACKAGE = '\$PACKAGE_NAME';
+          const PACKAGE = '$PACKAGE_NAME';
+          
           let isReady = false;
-
           setTimeout(() => { isReady = true; }, 60000); // 60s fallback
 
           app.post('/api/ready', (req, res) => {
-            isReady = true;
-            res.json({ ok: true });
+              isReady = true;
+              res.json({ ok: true });
           });
 
           app.post('/api/reset', (req, res) => {
-            console.log('[Node] Reset requested...');
-            isReady = false;
-            try {
-              execSync(ADB + ' -s emulator-5554 shell pm clear ' + PACKAGE, { timeout: 15000 });
-              execSync(ADB + ' -s emulator-5554 shell monkey -p ' + PACKAGE + ' -c android.intent.category.LAUNCHER 1', { timeout: 10000 });
-              setTimeout(() => { isReady = true; }, 3000);
-              res.json({ ok: true });
-            } catch(e) {
-              isReady = true;
-              res.json({ ok: true, warn: e.message });
-            }
+              console.log('[Node] Reset requested...');
+              isReady = false;
+              try {
+                  execSync(ADB + ' -s emulator-5554 shell pm clear ' + PACKAGE, { timeout: 15000 });
+                  execSync(ADB + ' -s emulator-5554 shell monkey -p ' + PACKAGE + ' -c android.intent.category.LAUNCHER 1', { timeout: 10000 });
+                  setTimeout(() => { isReady = true; }, 3000);
+                  res.json({ ok: true });
+              } catch(e) {
+                  isReady = true;
+                  res.json({ ok: true, warn: e.message });
+              }
           });
 
           app.get('/api/status', (req, res) => {
@@ -155,17 +161,17 @@ jobs:
           });
 
           const wsProxy = createProxyMiddleware({ target: 'http://127.0.0.1:8001', ws: true, changeOrigin: true });
-            app.use('/websockify', wsProxy);
+          app.use('/websockify', wsProxy);
 
           app.get('/', (req, res) => {
               res.sendFile(__dirname + '/index.html');
           });
 
           app.use(express.static('/usr/share/novnc'));
-
           const server = app.listen(8000, '0.0.0.0', () => console.log('Orchestrator running on port 8000'));
-            server.on('upgrade', wsProxy.upgrade);
+          server.on('upgrade', wsProxy.upgrade);
           JSEOF
+
       - name: Start display, emulator and VNC
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
@@ -309,6 +315,7 @@ jobs:
           (
             while true; do
               ssh -o StrictHostKeyChecking=no \
+                  -o UserKnownHostsFile=/dev/null \
                   -o ServerAliveInterval=30 \
                   -o ServerAliveCountMax=10 \
                   -i ~/.ssh/vps_key \
